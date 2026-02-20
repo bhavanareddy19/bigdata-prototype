@@ -1,0 +1,28 @@
+# Kubernetes namespaces for the BigData Platform
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend
+  labels:
+    app.kubernetes.io/part-of: bigdata-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airflow
+  labels:
+    app.kubernetes.io/part-of: bigdata-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    app.kubernetes.io/part-of: bigdata-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: bigdata-platform

@@ -1,0 +1,47 @@
+# Streamlit Frontend — Deployment + Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: backend
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: bigdata-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+          env:
+            - name: BACKEND_URL
+              value: "http://backend.backend.svc.cluster.local:8000"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: backend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 8501
+      targetPort: 8501
+  type: ClusterIP

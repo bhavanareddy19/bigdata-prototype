@@ -1,0 +1,100 @@
+# PostgreSQL — Deployment + Service + PVC (shared by Airflow + Marquez)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: data
+data:
+  POSTGRES_USER: airflow
+  POSTGRES_PASSWORD: airflow
+  POSTGRES_DB: airflow
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: data
+data:
+  init-marquez-db.sh: |
+    #!/bin/bash
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+      CREATE USER marquez WITH PASSWORD 'marquez';
+      CREATE DATABASE marquez OWNER marquez;
+      GRANT ALL PRIVILEGES ON DATABASE marquez TO marquez;
+    EOSQL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: data
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "airflow"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: data
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

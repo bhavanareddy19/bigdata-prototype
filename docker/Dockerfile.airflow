@@ -1,0 +1,25 @@
+# Custom Airflow image with OpenLineage + project DAGs
+FROM apache/airflow:2.8.1-python3.11
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+USER airflow
+
+# Install Airflow providers + OpenLineage
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-docker>=3.9.0 \
+    openlineage-airflow>=1.7.0 \
+    pandas>=2.1.0 \
+    scikit-learn>=1.4.0 \
+    great-expectations>=0.18.0 \
+    requests>=2.31
+
+# Copy DAGs
+COPY --chown=airflow:root dags/ /opt/airflow/dags/
+
+# OpenLineage config — emit events to Marquez
+ENV OPENLINEAGE_URL=http://marquez-api:5000
+ENV OPENLINEAGE_NAMESPACE=bigdata-platform

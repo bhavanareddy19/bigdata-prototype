@@ -1,0 +1,92 @@
+# FastAPI Backend — Deployment + Service + ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: backend
+data:
+  OLLAMA_BASE_URL: "http://ollama.backend.svc.cluster.local:11434"
+  OLLAMA_MODEL: "llama3.1:8b"
+  EMBEDDING_MODEL: "all-MiniLM-L6-v2"
+  CHROMADB_MODE: "local"
+  CHROMADB_PERSIST_DIR: "/data/chromadb"
+  MARQUEZ_URL: "http://marquez-api.data.svc.cluster.local:5000"
+  AIRFLOW_BASE_URL: "http://airflow-webserver.airflow.svc.cluster.local:8080"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: backend
+  labels:
+    app: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: bigdata-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          volumeMounts:
+            - name: chromadb-storage
+              mountPath: /data/chromadb
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: chromadb-storage
+          persistentVolumeClaim:
+            claimName: chromadb-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: backend
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chromadb-pvc
+  namespace: backend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

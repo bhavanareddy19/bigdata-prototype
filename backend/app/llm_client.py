@@ -1,14 +1,19 @@
+"""LLM client — Ollama only (100 % free & open-source).
+
+Uses Ollama HTTP API for both structured-JSON analysis and free-form chat.
+Recommended model: llama3.1:8b  (pull with `ollama pull llama3.1:8b`)
+"""
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
-from .settings import (
-    get_llm_provider,
-    get_ollama_base_url,
-    get_ollama_model,
-    get_openai_api_key,
-    get_openai_model,
-)
+import requests
+
+from .settings import get_ollama_base_url, get_ollama_model
+
+logger = logging.getLogger(__name__)
 
 
 class LlmNotConfiguredError(RuntimeError):
@@ -16,33 +21,50 @@ class LlmNotConfiguredError(RuntimeError):
 
 
 def llm_available() -> bool:
-    provider = get_llm_provider()
-    if provider == "ollama":
-        return bool(get_ollama_base_url()) and bool(get_ollama_model())
-    if provider == "openai":
-        return get_openai_api_key() is not None
-    return False
+    """Return True if Ollama is reachable."""
+    try:
+        r = requests.get(f"{get_ollama_base_url()}/api/tags", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def call_ollama_chat(
+    *,
+    messages: list[dict[str, str]],
+    model: str | None = None,
+    temperature: float = 0.2,
+    timeout: int = 120,
+) -> str:
+    """Generic Ollama chat call — returns the assistant text."""
+    base_url = get_ollama_base_url()
+    mdl = model or get_ollama_model()
+    url = f"{base_url.rstrip('/')}/api/chat"
+    payload = {
+        "model": mdl,
+        "stream": False,
+        "messages": messages,
+        "options": {"temperature": temperature},
+    }
+    r = requests.post(url, json=payload, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    return (data.get("message", {}) or {}).get("content", "").strip()
 
 
 def analyze_with_llm(*, prompt: str) -> dict[str, Any]:
-    provider = get_llm_provider()
+    """Call Ollama expecting STRICT JSON back (for log analysis)."""
+    content = call_ollama_chat(
+        messages=[
+            {"role": "system", "content": "You are a senior SRE/data engineer. Output STRICT JSON only."},
+            {"role": "user", "content": prompt},
+        ],
+    )
 
-    if provider == "ollama":
-        from .llm_ollama import analyze_with_ollama
+    # Strip markdown code fences if present
+    if content.startswith("```"):
+        content = content.strip("`")
+        if content.lower().startswith("json"):
+            content = content[4:].lstrip()
 
-        base_url = get_ollama_base_url()
-        model = get_ollama_model()
-        if not base_url or not model:
-            raise LlmNotConfiguredError("OLLAMA_BASE_URL/OLLAMA_MODEL not set")
-        return analyze_with_ollama(base_url=base_url, model=model, prompt=prompt)
-
-    if provider == "openai":
-        from .llm_openai import analyze_with_openai
-
-        api_key = get_openai_api_key()
-        if api_key is None:
-            raise LlmNotConfiguredError("OPENAI_API_KEY not set")
-        model = get_openai_model()
-        return analyze_with_openai(api_key=api_key, model=model, prompt=prompt)
-
-    raise LlmNotConfiguredError("LLM_PROVIDER is set to 'none'")
+    return json.loads(content)

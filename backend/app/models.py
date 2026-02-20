@@ -90,3 +90,28 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[dict[str, str]] = Field(default_factory=list)
     diagnostics: dict[str, Any] | None = None
+
+
+# ── Indexing / VectorDB ──────────────────────────────────────
+
+
+class IndexCodebaseRequest(BaseModel):
+    root_dir: str | None = Field(default=None, description="Server-side path to index. Defaults to workspace root.")
+    reset: bool = Field(default=False, description="Drop existing code collection before re-indexing.")
+
+
+class IndexStatsResponse(BaseModel):
+    code_chunks: int = 0
+    log_entries: int = 0
+    dag_metadata: int = 0
+    lineage_events: int = 0
+
+
+# ── Lineage ──────────────────────────────────────────────────
+
+
+class LineageRequest(BaseModel):
+    node_type: str = Field(default="job", description="'job' or 'dataset'")
+    namespace: str = Field(default="default")
+    node_name: str
+    depth: int = Field(default=5, ge=1, le=20)

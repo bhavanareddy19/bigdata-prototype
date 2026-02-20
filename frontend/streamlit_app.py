@@ -11,10 +11,13 @@ load_dotenv()
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
 
-st.set_page_config(page_title="Deploy Log Chatbot", layout="wide")
+st.set_page_config(page_title="BigData Platform — Observability Agent", layout="wide")
 
-st.title("Deploy Log Chatbot")
-st.caption("Ask questions about your running deployment/project. Attach logs or connect to K8s/Airflow for automatic log reading.")
+st.title("BigData Platform — Observability Agent")
+st.caption(
+    "RAG-powered chatbot using ChromaDB + Ollama (LLaMA 3.1). "
+    "Ask about your code, DAGs, deployments, lineage, or paste logs for analysis."
+)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -24,9 +27,44 @@ with st.sidebar:
     mode = st.selectbox("Mode", ["auto", "heuristic", "llm"], index=0)
     st.text_input("Backend URL", value=BACKEND_URL, key="backend_url")
 
-    st.subheader("Optional: Paste logs")
-    log_text = st.text_area("Logs", height=180, placeholder="Paste failing deploy/job logs here (optional)")
+    # ── Index controls ───────────────────────────────────
+    st.subheader("RAG Index")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Index Codebase", use_container_width=True):
+            try:
+                resp = requests.post(f"{st.session_state.backend_url}/index/codebase", json={"reset": False}, timeout=120)
+                resp.raise_for_status()
+                data = resp.json()
+                st.success(f"Indexed {data.get('indexed_chunks', 0)} code chunks")
+            except Exception as e:
+                st.error(f"Indexing failed: {e}")
+    with col2:
+        if st.button("View Stats", use_container_width=True):
+            try:
+                resp = requests.get(f"{st.session_state.backend_url}/index/stats", timeout=10)
+                resp.raise_for_status()
+                stats = resp.json()
+                st.json(stats)
+            except Exception as e:
+                st.error(f"Stats failed: {e}")
 
+    # ── Lineage controls ─────────────────────────────────
+    st.subheader("Lineage (Marquez)")
+    if st.button("Sync Lineage to VectorDB", use_container_width=True):
+        try:
+            resp = requests.post(f"{st.session_state.backend_url}/lineage/sync", timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            st.success(f"Synced {data.get('synced_events', 0)} lineage events")
+        except Exception as e:
+            st.warning(f"Lineage sync failed (Marquez may not be running): {e}")
+
+    # ── Optional: Paste logs ─────────────────────────────
+    st.subheader("Optional: Paste logs")
+    log_text = st.text_area("Logs", height=150, placeholder="Paste failing deploy/job logs here (optional)")
+
+    # ── Optional: Kubernetes pod ─────────────────────────
     st.subheader("Optional: Kubernetes pod")
     use_k8s = st.checkbox("Fetch K8s pod logs", value=False)
     k8s_namespace = st.text_input("Namespace", value="default")
@@ -34,6 +72,7 @@ with st.sidebar:
     k8s_container = st.text_input("Container (optional)", value="")
     k8s_tail = st.number_input("Tail lines", min_value=10, max_value=5000, value=500, step=50)
 
+    # ── Optional: Airflow task ───────────────────────────
     st.subheader("Optional: Airflow task")
     use_airflow = st.checkbox("Fetch Airflow task logs", value=False)
     airflow_base_url = st.text_input("Airflow Base URL (optional)", value=os.getenv("AIRFLOW_BASE_URL", ""))
@@ -51,7 +90,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-question = st.chat_input("Ask about the deployment, errors, DAGs, or what the project does...")
+question = st.chat_input("Ask about DAGs, lineage, deployments, errors, or the codebase...")
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
@@ -106,11 +145,21 @@ if question:
 
             sources = data.get("sources", [])
             if sources:
-                with st.expander("Sources"):
+                with st.expander("Sources & Retrieved Context"):
                     for s in sources[:8]:
-                        if s.get("type") == "repo":
-                            st.markdown(f"**{s.get('path')}**")
-                            st.code(s.get("snippet", ""))
+                        src_type = s.get("type", "")
+                        path = s.get("path", "")
+                        relevance = s.get("relevance", "")
+                        header = f"**[{src_type}]** {path}"
+                        if relevance:
+                            header += f" (relevance: {relevance})"
+                        st.markdown(header)
+                        st.code(s.get("snippet", ""), language="python")
+
+            diagnostics = data.get("diagnostics")
+            if diagnostics:
+                with st.expander("Diagnostics"):
+                    st.json(diagnostics)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
         except Exception as e:
