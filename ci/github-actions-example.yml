@@ -1,0 +1,36 @@
+# Example: capture deploy output to a file and only call the agent on failure.
+# Drop into .github/workflows/deploy.yml and adjust commands.
+
+name: Deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps (for post_logs)
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-dotenv
+
+      - name: Run deploy (capture logs)
+        id: deploy
+        run: |
+          set -o pipefail
+          ./deploy.sh 2>&1 | tee deploy.log
+
+      - name: Explain failure with agent
+        if: failure()
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/post_logs.py --backend "$BACKEND_URL" --mode auto --max-lines 400 deploy.log
