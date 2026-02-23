@@ -48,9 +48,17 @@ def fetch_airflow_task_logs(
     r = requests.get(url, params=params, auth=auth, timeout=60)
     r.raise_for_status()
 
-    data = r.json()
-    # Airflow returns {"content": "...", "continuation_token": ...}
-    content = data.get("content")
-    if not isinstance(content, str):
-        raise ValueError("Unexpected Airflow log response shape; expected JSON with 'content' string.")
-    return content
+    # Airflow 2.6+ may return plain text logs or JSON depending on version/config
+    content_type = r.headers.get("Content-Type", "")
+    if "application/json" in content_type:
+        data = r.json()
+        content = data.get("content", "")
+        if not isinstance(content, str):
+            raise ValueError("Unexpected Airflow log response shape; expected JSON with 'content' string.")
+        return content
+    else:
+        # Plain text response (Airflow 2.8+ default)
+        text = r.text.strip()
+        if not text:
+            raise ValueError("Airflow returned empty log content.")
+        return text

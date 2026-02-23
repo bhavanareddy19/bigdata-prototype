@@ -53,7 +53,7 @@ with st.sidebar:
     st.subheader("Lineage (Marquez)")
     if st.button("Sync Lineage to VectorDB", use_container_width=True):
         try:
-            resp = requests.post(f"{st.session_state.backend_url}/lineage/sync", timeout=30)
+            resp = requests.post(f"{st.session_state.backend_url}/lineage/sync?namespace=bigdata-platform", timeout=30)
             resp.raise_for_status()
             data = resp.json()
             st.success(f"Synced {data.get('synced_events', 0)} lineage events")

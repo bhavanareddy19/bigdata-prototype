@@ -159,6 +159,6 @@ def lineage_graph(req: LineageRequest):
 
 
 @app.post("/lineage/sync")
-def lineage_sync(namespace: str = "default"):
+def lineage_sync(namespace: str = "bigdata-platform"):
     count = sync_lineage_to_vectordb(namespace)
     return {"synced_events": count}

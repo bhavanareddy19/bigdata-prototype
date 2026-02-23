@@ -28,7 +28,7 @@ def run_tests(**context):
         [sys.executable, "-m", "pytest", "tests/", "-v", "--tb=short"],
         capture_output=True,
         text=True,
-        cwd="/opt/app",
+        cwd="/opt/airflow",
         timeout=300,
     )
 

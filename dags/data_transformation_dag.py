@@ -28,6 +28,10 @@ def clean_data(**context):
     staging = os.getenv("STAGING_ZONE", "/data/staging")
     os.makedirs(staging, exist_ok=True)
 
+    if not os.path.exists(raw_zone):
+        print(f"Raw zone not found: {raw_zone} — skipping (run data_ingestion first)")
+        return 0
+
     processed = 0
     for f in os.listdir(raw_zone):
         if not f.endswith(".csv"):
@@ -101,7 +105,7 @@ with DAG(
     dag_id="data_transformation",
     default_args=default_args,
     description="Clean, transform, and aggregate raw data into curated datasets",
-    schedule_interval="@daily",
+    schedule="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["transformation", "data-platform"],

@@ -134,7 +134,7 @@ with DAG(
     dag_id="ml_pipeline",
     default_args=default_args,
     description="Feature engineering and model training pipeline",
-    schedule_interval="@weekly",
+    schedule="@weekly",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["ml", "data-platform"],

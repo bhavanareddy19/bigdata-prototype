@@ -34,7 +34,7 @@ def call_ollama_chat(
     messages: list[dict[str, str]],
     model: str | None = None,
     temperature: float = 0.2,
-    timeout: int = 120,
+    timeout: int = 300,
 ) -> str:
     """Generic Ollama chat call — returns the assistant text."""
     base_url = get_ollama_base_url()

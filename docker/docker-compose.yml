@@ -27,6 +27,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__WEBSERVER__SECRET_KEY: "bigdata-platform-secret-key-change-in-prod"
+    # Enable basic auth for REST API (required for backend to fetch task logs)
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
     # OpenLineage → Marquez
     OPENLINEAGE_URL: http://marquez-api:5000
     OPENLINEAGE_NAMESPACE: bigdata-platform
@@ -61,7 +63,7 @@ services:
       - "8000:8000"
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: llama3.1:8b
+      OLLAMA_MODEL: llama3.2:1b
       EMBEDDING_MODEL: all-MiniLM-L6-v2
       CHROMADB_MODE: local
       CHROMADB_PERSIST_DIR: /chromadb
@@ -138,7 +140,7 @@ services:
         echo "Waiting for Ollama server..."
         until ollama list; do sleep 3; done
         echo "Pulling llama3.1:8b model (this may take a while on first run)..."
-        ollama pull llama3.1:8b
+        ollama pull llama3.2:1b
         echo "Model ready."
     environment:
       OLLAMA_HOST: http://ollama:11434
@@ -196,8 +198,10 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: marquez
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      # marquezproject/marquez:latest uses its bundled dev config → connects as 'marquez'/'marquez'
+      # These vars are ignored by the dev config but kept for documentation/future versions
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
     healthcheck:
       # Dropwizard admin port uses /healthcheck (not /health)
       test: ["CMD-SHELL", "curl -f http://localhost:5001/healthcheck || exit 1"]
@@ -219,6 +223,7 @@ services:
     environment:
       MARQUEZ_HOST: marquez-api
       MARQUEZ_PORT: 5000
+      WEB_PORT: 3000
     depends_on:
       marquez-api:
         condition: service_healthy

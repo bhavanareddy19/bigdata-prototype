@@ -2,6 +2,9 @@
 # Create multiple PostgreSQL databases on initialization.
 # Used by docker-compose to create both 'airflow' and 'marquez' databases.
 # This script runs automatically when the postgres container starts for the first time.
+#
+# IMPORTANT: marquezproject/marquez:latest uses its bundled dev config which
+# connects as user 'marquez' / password 'marquez' — so we must create that user.
 
 set -e
 set -u
@@ -23,3 +26,19 @@ if [ -n "${POSTGRES_MULTIPLE_DATABASES:-}" ]; then
     done
     echo "==> All databases created successfully."
 fi
+
+# Create dedicated 'marquez' user for the Marquez lineage service.
+# marquezproject/marquez uses its bundled dev config which hardcodes user=marquez / password=marquez.
+echo "==> Creating 'marquez' user for Marquez lineage service..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+    DO \$\$
+    BEGIN
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'marquez') THEN
+            CREATE USER marquez WITH PASSWORD 'marquez';
+        END IF;
+    END
+    \$\$;
+    GRANT ALL PRIVILEGES ON DATABASE marquez TO marquez;
+    ALTER DATABASE marquez OWNER TO marquez;
+EOSQL
+echo "==> Marquez user created."

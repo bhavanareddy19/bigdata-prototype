@@ -129,7 +129,7 @@ with DAG(
     dag_id="data_quality_checks",
     default_args=default_args,
     description="Run data quality validations on curated datasets",
-    schedule_interval="@daily",
+    schedule="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["quality", "data-platform"],
