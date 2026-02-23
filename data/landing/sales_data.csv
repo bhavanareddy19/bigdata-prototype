@@ -1,16 +1,71 @@
 id,product,category,quantity,price,status,region
-1,Widget A,Electronics,10,29.99,active,North
-2,Widget B,Electronics,5,49.99,active,South
-3,Gadget C,Home,20,9.99,inactive,East
-4,Tool D,Industrial,2,199.99,active,West
-5,Widget E,Electronics,15,34.99,active,North
-6,Gadget F,Home,8,14.99,inactive,South
-7,Tool G,Industrial,3,149.99,active,East
-8,Widget H,Electronics,12,24.99,active,West
-9,Gadget I,Home,25,7.99,active,North
-10,Tool J,Industrial,1,299.99,inactive,South
-11,Widget K,Electronics,7,39.99,active,East
-12,Gadget L,Home,30,5.99,active,West
-13,Tool M,Industrial,4,179.99,active,North
-14,Widget N,Electronics,9,44.99,inactive,South
-15,Gadget O,Home,18,11.99,active,East
+1,iPhone 15 Pro,Electronics,10,999.99,active,North
+2,Samsung Galaxy S24,Electronics,8,849.99,active,South
+3,MacBook Air M3,Electronics,3,1299.99,active,East
+4,Dell XPS 15,Electronics,5,1199.99,active,West
+5,Sony WH-1000XM5,Electronics,15,349.99,active,North
+6,iPad Pro 12.9,Electronics,7,1099.99,active,South
+7,LG OLED TV 55,Electronics,2,1499.99,inactive,East
+8,Bose QC45,Electronics,12,279.99,active,West
+9,Apple Watch Series 9,Electronics,20,399.99,active,North
+10,Google Pixel 8,Electronics,6,699.99,active,South
+11,Dyson V15 Vacuum,Home,4,749.99,active,East
+12,Instant Pot Duo,Home,18,89.99,active,West
+13,Nespresso Vertuo,Home,9,199.99,active,North
+14,KitchenAid Mixer,Home,3,449.99,active,South
+15,Roomba i7+,Home,6,599.99,inactive,East
+16,Ninja Air Fryer,Home,22,129.99,active,West
+17,Philips Hue Starter,Home,14,199.99,active,North
+18,iRobot Braava,Home,5,299.99,active,South
+19,Cuisinart Blender,Home,11,79.99,active,East
+20,Weber Grill Q1200,Home,3,249.99,inactive,West
+21,Nike Air Max 270,Apparel,30,150.00,active,North
+22,Adidas Ultraboost 23,Apparel,25,190.00,active,South
+23,Levi 501 Jeans,Apparel,40,69.99,active,East
+24,North Face Puffer,Apparel,12,299.99,active,West
+25,Under Armour Hoodie,Apparel,35,74.99,active,North
+26,Patagonia Fleece,Apparel,8,149.99,inactive,South
+27,Ray-Ban Aviators,Apparel,20,163.00,active,East
+28,Timberland Boots,Apparel,16,198.00,active,West
+29,Columbia Rain Jacket,Apparel,9,120.00,active,North
+30,Champion Sweatshirt,Apparel,45,55.00,active,South
+31,Black+Decker Drill,Tools,7,89.99,active,East
+32,DeWalt Circular Saw,Tools,4,189.99,active,West
+33,Makita Sander,Tools,6,99.99,active,North
+34,Milwaukee Impact Driver,Tools,5,229.99,active,South
+35,Bosch Jigsaw,Tools,3,149.99,inactive,East
+36,Stanley Toolbox,Tools,15,59.99,active,West
+37,Ryobi Cordless Kit,Tools,8,299.99,active,North
+38,Craftsman Wrench Set,Tools,20,44.99,active,South
+39,Irwin Clamps Set,Tools,12,34.99,active,East
+40,Dremel Rotary Tool,Tools,9,79.99,active,West
+41,Whey Protein 5lb,Sports,50,59.99,active,North
+42,Yoga Mat Premium,Sports,35,49.99,active,South
+43,Resistance Bands Set,Sports,60,24.99,active,East
+44,Kettlebell 20kg,Sports,18,54.99,active,West
+45,Foam Roller Pro,Sports,40,29.99,active,North
+46,Jump Rope Speed,Sports,55,14.99,active,South
+47,Pull Up Bar Door,Sports,22,39.99,active,East
+48,Dumbbell Set 20lb,Sports,14,79.99,inactive,West
+49,Running Belt Waist,Sports,30,19.99,active,North
+50,Cycling Gloves,Sports,45,22.99,active,South
+51,Python Programming Book,Books,100,49.99,active,East
+52,Data Science Handbook,Books,75,59.99,active,West
+53,Clean Code,Books,80,39.99,active,North
+54,The Pragmatic Programmer,Books,65,44.99,active,South
+55,Design Patterns,Books,50,54.99,inactive,East
+56,ML with Python,Books,90,49.99,active,West
+57,Docker Deep Dive,Books,70,34.99,active,North
+58,Kubernetes in Action,Books,55,59.99,active,South
+59,System Design Interview,Books,85,44.99,active,East
+60,Algorithms Unlocked,Books,60,29.99,active,West
+61,Office Chair Ergonomic,Furniture,5,449.99,active,North
+62,Standing Desk Electric,Furniture,3,899.99,active,South
+63,Monitor Arm Dual,Furniture,8,129.99,active,East
+64,Bookshelf 5 Tier,Furniture,6,149.99,active,West
+65,Filing Cabinet 3 Drawer,Furniture,4,199.99,inactive,North
+66,Desk Lamp LED,Furniture,20,49.99,active,South
+67,Whiteboard 48x36,Furniture,7,89.99,active,East
+68,Cable Management Kit,Furniture,25,19.99,active,West
+69,Desk Organizer Set,Furniture,30,34.99,active,North
+70,Monitor Riser,Furniture,18,39.99,active,South

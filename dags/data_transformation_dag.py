@@ -2,6 +2,11 @@
 
 Reads from raw zone, applies transformations, writes to processed zone.
 OpenLineage tracks every input/output dataset automatically.
+
+Failure scenarios (for observability testing):
+  - clean_data: DataTypeError if price column has non-numeric/negative values
+  - transform_aggregate: fails if required 'status' column is missing after clean
+  - enrich_with_metadata: fails if processed zone is empty (nothing to enrich)
 """
 from __future__ import annotations
 
@@ -19,7 +24,13 @@ default_args = {
 
 
 def clean_data(**context):
-    """Clean raw CSV data: drop nulls, normalize columns, fix types."""
+    """Clean raw CSV data: drop nulls, normalize columns, validate types.
+
+    Failure scenarios:
+      - DataTypeError: price column contains non-numeric values (e.g. 'N/A', 'unknown')
+      - DataTypeError: negative prices detected — possible data corruption
+      - EmptyDataError: all rows dropped after cleaning
+    """
     import os
 
     import pandas as pd
@@ -33,23 +44,83 @@ def clean_data(**context):
         return 0
 
     processed = 0
+    errors = []
+
     for f in os.listdir(raw_zone):
-        if not f.endswith(".csv"):
+        if not f.endswith(".csv") or f.startswith("."):
             continue
-        df = pd.read_csv(os.path.join(raw_zone, f))
-        # Drop rows where all values are null
-        df = df.dropna(how="all")
-        # Normalize column names
+
+        filepath = os.path.join(raw_zone, f)
+        df = pd.read_csv(filepath)
+
+        # Normalize column names first
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-        df.to_csv(os.path.join(staging, f"cleaned_{f}"), index=False)
+
+        # ── Price column validation ──────────────────────────
+        if "price" in df.columns:
+            numeric_price = pd.to_numeric(df["price"], errors="coerce")
+            bad_vals = df[numeric_price.isna()]["price"].dropna().unique().tolist()
+            if bad_vals:
+                errors.append(
+                    f"DataTypeError in {f}: 'price' column has {len(bad_vals)} non-numeric "
+                    f"value(s): {bad_vals[:5]}. "
+                    f"All prices must be numeric floats. Check source system for data entry errors."
+                )
+                continue  # skip this file, do not write bad data downstream
+
+            negative_prices = (numeric_price < 0).sum()
+            if negative_prices > 0:
+                errors.append(
+                    f"DataQualityError in {f}: found {negative_prices} negative price(s). "
+                    f"Negative prices are invalid — possible sign error or data corruption in source."
+                )
+                continue
+
+        # ── Quantity validation ──────────────────────────────
+        if "quantity" in df.columns:
+            numeric_qty = pd.to_numeric(df["quantity"], errors="coerce")
+            null_qty = numeric_qty.isna().sum()
+            if null_qty > 0:
+                print(f"WARNING: {f} has {null_qty} null quantity value(s) — rows will be dropped")
+                df = df[numeric_qty.notna()].copy()
+
+        # ── Drop rows where all values are null ──────────────
+        before = len(df)
+        df = df.dropna(how="all")
+        dropped = before - len(df)
+        if dropped > 0:
+            print(f"Dropped {dropped} fully-null rows from {f}")
+
+        if len(df) == 0:
+            errors.append(
+                f"EmptyDataError in {f}: after cleaning, 0 rows remain. "
+                f"The source file may be entirely null or have wrong encoding."
+            )
+            continue
+
+        out_path = os.path.join(staging, f"cleaned_{f}")
+        df.to_csv(out_path, index=False)
         processed += 1
+        print(f"Cleaned {f}: {len(df)} rows → {out_path}")
+
+    if errors:
+        error_summary = "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
+        raise ValueError(
+            f"clean_data failed with {len(errors)} error(s):\n{error_summary}\n"
+            f"Fix the source data issues above before re-running."
+        )
 
     print(f"Cleaned {processed} files → staging zone")
     return processed
 
 
 def transform_aggregate(**context):
-    """Aggregate cleaned data: group by key columns, compute metrics."""
+    """Aggregate cleaned data: group by status, compute totals.
+
+    Failure scenarios:
+      - FileNotFoundError: no cleaned files exist (clean_data wrote nothing)
+      - ValueError: 'status' column missing — cannot group data as expected
+    """
     import os
 
     import pandas as pd
@@ -58,29 +129,44 @@ def transform_aggregate(**context):
     processed_zone = os.getenv("PROCESSED_ZONE", "/data/processed")
     os.makedirs(processed_zone, exist_ok=True)
 
-    dfs = []
-    for f in os.listdir(staging):
-        if f.startswith("cleaned_") and f.endswith(".csv"):
-            dfs.append(pd.read_csv(os.path.join(staging, f)))
+    cleaned_files = [f for f in os.listdir(staging) if f.startswith("cleaned_") and f.endswith(".csv")]
 
-    if not dfs:
-        print("No cleaned files to aggregate")
-        return
+    if not cleaned_files:
+        raise FileNotFoundError(
+            "AggregationError: No cleaned files found in staging zone. "
+            "Either data_ingestion has not run yet, or clean_data failed for all files. "
+            "Run data_ingestion first, then check clean_data task logs for errors."
+        )
+
+    dfs = []
+    for f in cleaned_files:
+        dfs.append(pd.read_csv(os.path.join(staging, f)))
 
     combined = pd.concat(dfs, ignore_index=True)
+    print(f"Loaded {len(combined)} total rows from {len(dfs)} cleaned file(s)")
 
-    # Example aggregation: if there's a 'status' column, group by it
-    if "status" in combined.columns:
-        agg = combined.groupby("status").agg("count").reset_index()
-        agg.to_csv(os.path.join(processed_zone, "status_aggregation.csv"), index=False)
-        print(f"Aggregated {len(combined)} rows by status → processed zone")
-    else:
-        combined.to_csv(os.path.join(processed_zone, "combined_data.csv"), index=False)
-        print(f"Combined {len(combined)} rows → processed zone")
+    if "status" not in combined.columns:
+        raise ValueError(
+            "SchemaError: 'status' column not found after combining cleaned files. "
+            f"Available columns: {list(combined.columns)}. "
+            "The 'status' column is required for aggregation. "
+            "Check if clean_data renamed or dropped this column."
+        )
+
+    agg = combined.groupby("status").agg("count").reset_index()
+    agg.to_csv(os.path.join(processed_zone, "status_aggregation.csv"), index=False)
+    combined.to_csv(os.path.join(processed_zone, "combined_data.csv"), index=False)
+
+    print(f"Aggregated {len(combined)} rows by status → {len(agg)} groups")
+    print(f"Status breakdown:\n{agg.to_string(index=False)}")
 
 
 def enrich_with_metadata(**context):
-    """Add metadata columns: processing timestamp, source tracking."""
+    """Add metadata columns: processing timestamp, source tracking, pipeline version.
+
+    Failure scenarios:
+      - FileNotFoundError: processed zone is empty (transform_aggregate wrote nothing)
+    """
     import os
 
     import pandas as pd
@@ -89,16 +175,27 @@ def enrich_with_metadata(**context):
     curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
     os.makedirs(curated_zone, exist_ok=True)
 
-    for f in os.listdir(processed_zone):
-        if not f.endswith(".csv"):
-            continue
+    csv_files = [f for f in os.listdir(processed_zone) if f.endswith(".csv") and not f.startswith(".")]
+
+    if not csv_files:
+        raise FileNotFoundError(
+            "EnrichmentError: No processed CSV files found in processed zone. "
+            "transform_aggregate must complete successfully before enrichment can run. "
+            "Check transform_aggregate task logs."
+        )
+
+    enriched = 0
+    for f in csv_files:
         df = pd.read_csv(os.path.join(processed_zone, f))
         df["_processed_at"] = datetime.utcnow().isoformat()
         df["_source_file"] = f
         df["_pipeline_version"] = "1.0.0"
-        df.to_csv(os.path.join(curated_zone, f"curated_{f}"), index=False)
+        out_path = os.path.join(curated_zone, f"curated_{f}")
+        df.to_csv(out_path, index=False)
+        enriched += 1
+        print(f"Enriched {f} ({len(df)} rows) → {out_path}")
 
-    print(f"Enriched data → curated zone")
+    print(f"Enrichment complete: {enriched} file(s) written to curated zone")
 
 
 with DAG(

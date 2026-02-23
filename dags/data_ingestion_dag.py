@@ -2,6 +2,10 @@
 
 OpenLineage is auto-enabled via the openlineage-airflow provider.
 Every task emits START/COMPLETE/FAIL lineage events to Marquez.
+
+Failure scenarios (for observability testing):
+  - validate_raw_data: fails if a CSV has wrong/missing required columns
+  - validate_raw_data: fails if price column contains non-numeric values
 """
 from __future__ import annotations
 
@@ -16,6 +20,12 @@ default_args = {
     "email_on_failure": False,
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
+}
+
+# Expected columns for each known file — any deviation triggers a SchemaValidationError
+REQUIRED_SCHEMAS = {
+    "sales_data.csv": ["id", "product", "category", "quantity", "price", "status", "region"],
+    "user_events.csv": ["user_id", "event_type", "timestamp", "page", "duration_seconds", "status"],
 }
 
 
@@ -38,7 +48,7 @@ def ingest_csv_files(**context):
                 files.append(f)
 
     context["ti"].xcom_push(key="ingested_files", value=files)
-    print(f"Ingested {len(files)} CSV files into raw zone")
+    print(f"Ingested {len(files)} CSV files into raw zone: {files}")
     return len(files)
 
 
@@ -69,23 +79,89 @@ def ingest_api_data(**context):
 
 
 def validate_raw_data(**context):
-    """Basic validation: check that raw files are non-empty and have expected format."""
+    """Validate raw files exist, are non-empty, and match expected schemas.
+
+    Failure scenarios:
+      - SchemaValidationError: CSV is missing required columns
+      - SchemaValidationError: CSV has unexpected/wrong column names (bad source)
+      - DataTypeError: price column contains non-numeric values
+    """
     import os
+
+    import pandas as pd
 
     raw_zone = os.getenv("RAW_ZONE", "/data/raw")
     if not os.path.exists(raw_zone):
         raise FileNotFoundError(f"Raw zone does not exist: {raw_zone}")
 
+    all_files = [f for f in os.listdir(raw_zone) if not f.startswith(".")]
     errors = []
-    for f in os.listdir(raw_zone):
+
+    # ── 1. Empty file check ──────────────────────────────────
+    for f in all_files:
         fp = os.path.join(raw_zone, f)
         if os.path.getsize(fp) == 0:
-            errors.append(f"{f} is empty")
+            errors.append(f"EmptyFileError: {f} is 0 bytes")
+
+    # ── 2. Schema validation for known CSV files ─────────────
+    for fname, required_cols in REQUIRED_SCHEMAS.items():
+        fpath = os.path.join(raw_zone, fname)
+        if not os.path.exists(fpath):
+            # Not present yet — soft warning (ingest may not have run)
+            print(f"WARNING: expected file {fname} not found in raw zone")
+            continue
+
+        df_head = pd.read_csv(fpath, nrows=0)
+        actual_cols = list(df_head.columns)
+
+        missing_cols = [c for c in required_cols if c not in actual_cols]
+        if missing_cols:
+            errors.append(
+                f"SchemaValidationError: {fname} is missing required columns {missing_cols}. "
+                f"Got columns: {actual_cols}. "
+                f"This usually means the source system sent a different schema."
+            )
+
+        unexpected_cols = [c for c in actual_cols if c not in required_cols]
+        if unexpected_cols:
+            errors.append(
+                f"SchemaValidationError: {fname} has unexpected columns {unexpected_cols}. "
+                f"Expected: {required_cols}. "
+                f"Check if the upstream data provider changed their schema."
+            )
+
+    # ── 3. Data type checks for critical columns ─────────────
+    sales_path = os.path.join(raw_zone, "sales_data.csv")
+    if os.path.exists(sales_path):
+        try:
+            df = pd.read_csv(sales_path)
+            if "price" in df.columns:
+                non_numeric = pd.to_numeric(df["price"], errors="coerce").isna().sum()
+                if non_numeric > 0:
+                    bad_vals = df[pd.to_numeric(df["price"], errors="coerce").isna()]["price"].unique().tolist()
+                    errors.append(
+                        f"DataTypeError: sales_data.csv has {non_numeric} non-numeric value(s) "
+                        f"in 'price' column: {bad_vals}. "
+                        f"Expected all float values. Possible data corruption or encoding issue."
+                    )
+            if "quantity" in df.columns:
+                negative_qty = (pd.to_numeric(df["quantity"], errors="coerce") < 0).sum()
+                if negative_qty > 0:
+                    errors.append(
+                        f"DataQualityError: sales_data.csv has {negative_qty} negative quantity value(s). "
+                        f"Negative quantities are not allowed — check source system for data entry errors."
+                    )
+        except Exception as e:
+            errors.append(f"ReadError: Could not read sales_data.csv for type checking: {e}")
 
     if errors:
-        raise ValueError(f"Raw data validation failed: {errors}")
+        error_summary = "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
+        raise ValueError(
+            f"Raw data validation failed with {len(errors)} error(s):\n{error_summary}\n"
+            f"Fix the issues above before data_transformation can proceed."
+        )
 
-    print(f"Validated {len(os.listdir(raw_zone))} files in raw zone")
+    print(f"Validated {len(all_files)} files in raw zone — all checks passed")
 
 
 with DAG(
