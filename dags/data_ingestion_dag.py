@@ -45,10 +45,9 @@ def ingest_csv_files(**context):
 def ingest_api_data(**context):
     """Simulate fetching data from an external REST API."""
     import json
-
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw") if "os" in dir() else "/data/raw"
     import os
 
+    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
     os.makedirs(raw_zone, exist_ok=True)
 
     # Simulate API response

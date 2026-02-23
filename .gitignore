@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files (contain secrets)
+.env
+
+# ChromaDB local data
+.chromadb/
+
+# Data pipeline runtime outputs (keep .gitkeep but ignore generated files)
+data/raw/*
+data/staging/*
+data/processed/*
+data/curated/*
+data/features/*
+data/models/*
+data/chromadb/*
+!data/**/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# MyPy
+.mypy_cache/

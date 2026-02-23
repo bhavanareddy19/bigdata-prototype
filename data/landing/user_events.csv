@@ -1,0 +1,13 @@
+user_id,event_type,timestamp,page,duration_seconds,status
+101,page_view,2025-01-15 08:30:00,/home,12,active
+102,click,2025-01-15 08:31:00,/products,3,active
+103,page_view,2025-01-15 08:32:00,/about,8,active
+101,purchase,2025-01-15 08:35:00,/checkout,45,active
+104,page_view,2025-01-15 08:36:00,/home,15,inactive
+105,click,2025-01-15 08:37:00,/products,5,active
+102,purchase,2025-01-15 08:40:00,/checkout,60,active
+106,page_view,2025-01-15 08:41:00,/home,10,active
+103,click,2025-01-15 08:42:00,/docs,7,active
+107,page_view,2025-01-15 08:43:00,/pricing,20,active
+108,signup,2025-01-15 08:45:00,/register,30,active
+101,page_view,2025-01-15 08:50:00,/dashboard,25,active

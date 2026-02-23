@@ -1,0 +1,16 @@
+id,product,category,quantity,price,status,region
+1,Widget A,Electronics,10,29.99,active,North
+2,Widget B,Electronics,5,49.99,active,South
+3,Gadget C,Home,20,9.99,inactive,East
+4,Tool D,Industrial,2,199.99,active,West
+5,Widget E,Electronics,15,34.99,active,North
+6,Gadget F,Home,8,14.99,inactive,South
+7,Tool G,Industrial,3,149.99,active,East
+8,Widget H,Electronics,12,24.99,active,West
+9,Gadget I,Home,25,7.99,active,North
+10,Tool J,Industrial,1,299.99,inactive,South
+11,Widget K,Electronics,7,39.99,active,East
+12,Gadget L,Home,30,5.99,active,West
+13,Tool M,Industrial,4,179.99,active,North
+14,Widget N,Electronics,9,44.99,inactive,South
+15,Gadget O,Home,18,11.99,active,East

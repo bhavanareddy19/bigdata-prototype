@@ -93,7 +93,7 @@ spec:
           command: ["/bin/bash", "-c"]
           args:
             - |
-              airflow db init &&
+              airflow db migrate &&
               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
           envFrom:
             - configMapRef:
@@ -157,7 +157,7 @@ spec:
         - name: db-init
           image: bigdata-airflow:latest
           imagePullPolicy: IfNotPresent
-          command: ["airflow", "db", "init"]
+          command: ["airflow", "db", "migrate"]
           envFrom:
             - configMapRef:
                 name: airflow-config
@@ -199,7 +199,7 @@ spec:
         - name: db-init
           image: bigdata-airflow:latest
           imagePullPolicy: IfNotPresent
-          command: ["airflow", "db", "init"]
+          command: ["airflow", "db", "migrate"]
           envFrom:
             - configMapRef:
                 name: airflow-config

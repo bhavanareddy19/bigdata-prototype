@@ -31,6 +31,5 @@ jobs:
         if: failure()
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python scripts/post_logs.py --backend "$BACKEND_URL" --mode auto --max-lines 400 deploy.log

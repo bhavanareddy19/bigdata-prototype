@@ -5,14 +5,13 @@
 #   backend      — FastAPI + RAG Engine + ChromaDB (in-process)
 #   frontend     — Streamlit chat UI
 #   ollama       — Local LLM server (LLaMA 3.1:8b)
+#   ollama-init  — One-time: pulls the LLaMA model automatically
 #   airflow-*    — Airflow scheduler + webserver + worker
 #   postgres     — Metadata DB for Airflow + Marquez
 #   redis        — Celery broker for Airflow
 #   marquez-api  — OpenLineage lineage server
 #   marquez-web  — Marquez UI
 # ═══════════════════════════════════════════════════════════════
-
-version: "3.8"
 
 x-airflow-common: &airflow-common
   build:
@@ -23,13 +22,15 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres:5432/airflow
-    AIRFLOW__CORE__FERNET_KEY: ""
+    # REQUIRED: Fernet key for encrypting DB passwords in Airflow UI
+    AIRFLOW__CORE__FERNET_KEY: "qzSQcblwwHm_msLLg5iEf8Tth45rbXyjN4K9EKnWLwI="
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__SECRET_KEY: "bigdata-platform-secret-key-change-in-prod"
     # OpenLineage → Marquez
     OPENLINEAGE_URL: http://marquez-api:5000
     OPENLINEAGE_NAMESPACE: bigdata-platform
-    # Data zones (shared volume)
+    # Data zones (shared bind-mounted volume → ../data)
     LANDING_ZONE: /data/landing
     RAW_ZONE: /data/raw
     STAGING_ZONE: /data/staging
@@ -41,7 +42,8 @@ x-airflow-common: &airflow-common
     BACKEND_URL: http://backend:8000
   volumes:
     - ../dags:/opt/airflow/dags
-    - data-lake:/data
+    # FIXED: bind mount to local ./data so sample CSVs are accessible
+    - ../data:/data
   depends_on:
     postgres:
       condition: service_healthy
@@ -62,12 +64,23 @@ services:
       OLLAMA_MODEL: llama3.1:8b
       EMBEDDING_MODEL: all-MiniLM-L6-v2
       CHROMADB_MODE: local
-      CHROMADB_PERSIST_DIR: /data/chromadb
+      CHROMADB_PERSIST_DIR: /chromadb
       MARQUEZ_URL: http://marquez-api:5000
       AIRFLOW_BASE_URL: http://airflow-webserver:8080
+      # backend fetches Airflow task logs with auth
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
     volumes:
-      - chromadb-data:/data/chromadb
-      - data-lake:/data
+      # ChromaDB persisted data (named volume — survives restarts)
+      - chromadb-data:/chromadb
+      # Bind mount local data/ so backend can search sample files
+      - ../data:/app-data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       - ollama
       - marquez-api
@@ -84,7 +97,9 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
     depends_on:
-      - backend
+      backend:
+        # FIXED: frontend waits until backend /health passes
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Ollama (Local LLM — 100% free) ────────────────────
@@ -95,6 +110,13 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
+    healthcheck:
+      # Use ollama CLI (always present) — no curl dependency
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     # GPU support (uncomment if you have NVIDIA GPU)
     # deploy:
     #   resources:
@@ -105,6 +127,26 @@ services:
     #           capabilities: [gpu]
     restart: unless-stopped
 
+  # ── Ollama Init — pulls LLaMA model automatically ──────
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Waiting for Ollama server..."
+        until ollama list; do sleep 3; done
+        echo "Pulling llama3.1:8b model (this may take a while on first run)..."
+        ollama pull llama3.1:8b
+        echo "Model ready."
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   # ── PostgreSQL (Airflow + Marquez metadata) ────────────
   postgres:
     image: postgres:16-alpine
@@ -113,18 +155,19 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-      # Create Marquez DB too
+      # Creates the 'marquez' database automatically on first boot
       POSTGRES_MULTIPLE_DATABASES: marquez
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ── Redis (Airflow Celery broker) ──────────────────────
@@ -155,6 +198,13 @@ services:
       POSTGRES_DB: marquez
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
+    healthcheck:
+      # Dropwizard admin port uses /healthcheck (not /health)
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/healthcheck || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,7 +220,8 @@ services:
       MARQUEZ_HOST: marquez-api
       MARQUEZ_PORT: 5000
     depends_on:
-      - marquez-api
+      marquez-api:
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Airflow Webserver ──────────────────────────────────
@@ -185,6 +236,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ── Airflow Scheduler ─────────────────────────────────
@@ -192,6 +251,13 @@ services:
     <<: *airflow-common
     container_name: airflow-scheduler
     command: scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ── Airflow Worker ────────────────────────────────────
@@ -199,9 +265,16 @@ services:
     <<: *airflow-common
     container_name: airflow-worker
     command: celery worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
-  # ── Airflow Init (run once) ───────────────────────────
+  # ── Airflow Init (run once — migrate DB + create admin) ──
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
@@ -209,7 +282,7 @@ services:
     command:
       - -c
       - |
-        airflow db init
+        airflow db migrate
         airflow users create \
           --username admin \
           --password admin \
@@ -217,10 +290,10 @@ services:
           --lastname User \
           --role Admin \
           --email admin@example.com || true
+        echo "Airflow init complete."
     restart: "no"
 
 volumes:
   postgres-data:
   ollama-models:
   chromadb-data:
-  data-lake:
