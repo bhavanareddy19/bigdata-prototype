@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_paths import build_paths
+from utils.storage_io import ensure_dir, list_files, join_path, copy_file, write_text, path_exists
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -35,15 +38,15 @@ def check_schema_conformance(**context):
 
     import pandas as pd
 
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
-    if not os.path.exists(curated_zone):
+    curated_zone = paths["curated"]
+    if not path_exists(curated_zone):
         raise FileNotFoundError(
             f"SchemaCheckError: Curated zone not found at {curated_zone}. "
             "The data_transformation DAG must complete before quality checks can run. "
             "Trigger data_transformation first."
         )
 
-    csv_files = [f for f in os.listdir(curated_zone) if f.endswith(".csv") and not f.startswith(".")]
+    csv_files = [f for f in list_files(curated_zone) if f.endswith(".csv") and not f.startswith(".")]
     if not csv_files:
         raise FileNotFoundError(
             "SchemaCheckError: No CSV files found in curated zone. "
@@ -55,7 +58,7 @@ def check_schema_conformance(**context):
     required_meta = ["_processed_at", "_source_file", "_pipeline_version"]
 
     for f in csv_files:
-        df = pd.read_csv(os.path.join(curated_zone, f))
+        df = pd.read_csv(join_path(curated_zone, f))
         missing = [c for c in required_meta if c not in df.columns]
         if missing:
             errors.append(
@@ -82,15 +85,15 @@ def check_null_ratios(**context):
 
     import pandas as pd
 
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
+    curated_zone = paths["curated"]
     # 10% threshold — strict enough to catch schema merge issues
     threshold = float(os.getenv("NULL_RATIO_THRESHOLD", "0.10"))
 
     violations = []
-    for f in os.listdir(curated_zone):
+    for f in list_files(curated_zone):
         if not f.endswith(".csv") or f.startswith("."):
             continue
-        df = pd.read_csv(os.path.join(curated_zone, f))
+        df = pd.read_csv(join_path(curated_zone, f))
         if len(df) == 0:
             continue
 
@@ -126,14 +129,14 @@ def check_row_counts(**context):
 
     import pandas as pd
 
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
+    curated_zone = paths["curated"]
     min_rows = int(os.getenv("MIN_EXPECTED_ROWS", "3"))
 
     errors = []
-    for f in os.listdir(curated_zone):
+    for f in list_files(curated_zone):
         if not f.endswith(".csv") or f.startswith("."):
             continue
-        df = pd.read_csv(os.path.join(curated_zone, f))
+        df = pd.read_csv(join_path(curated_zone, f))
         if len(df) < min_rows:
             errors.append(
                 f"RowCountError in {f}: only {len(df)} row(s) found (minimum: {min_rows}). "
@@ -158,14 +161,14 @@ def check_duplicates(**context):
 
     import pandas as pd
 
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
+    curated_zone = paths["curated"]
     max_dup_ratio = float(os.getenv("MAX_DUPLICATE_RATIO", "0.05"))
 
     violations = []
-    for f in os.listdir(curated_zone):
+    for f in join_path(curated_zone):
         if not f.endswith(".csv") or f.startswith("."):
             continue
-        df = pd.read_csv(os.path.join(curated_zone, f))
+        df = pd.read_csv(join_path(curated_zone, f))
         if len(df) == 0:
             continue
 

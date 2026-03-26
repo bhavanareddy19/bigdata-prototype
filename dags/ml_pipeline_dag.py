@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_paths import build_paths
+from utils.storage_io import ensure_dir, list_files, join_path, copy_file, write_text, path_exists
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -35,11 +38,11 @@ def build_features(**context):
 
     import pandas as pd
 
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
-    features_dir = os.getenv("FEATURES_DIR", "/data/features")
-    os.makedirs(features_dir, exist_ok=True)
+    curated_zone = paths["curated"]
+    features_dir = paths["features"]
+    ensure_dir(features_dir, exist_ok=True)
 
-    csv_files = [f for f in os.listdir(curated_zone) if f.endswith(".csv") and not f.startswith(".")]
+    csv_files = [f for f in join_path(curated_zone) if f.endswith(".csv") and not f.startswith(".")]
 
     if not csv_files:
         raise FileNotFoundError(
@@ -51,7 +54,7 @@ def build_features(**context):
 
     dfs = []
     for f in csv_files:
-        dfs.append(pd.read_csv(os.path.join(curated_zone, f)))
+        dfs.append(pd.read_csv(join_path(curated_zone, f)))
 
     combined = pd.concat(dfs, ignore_index=True)
 
@@ -72,7 +75,7 @@ def build_features(**context):
 
     features = features.fillna(0)
 
-    output = os.path.join(features_dir, "features.csv")
+    output = join_path(features_dir, "features.csv")
     features.to_csv(output, index=False)
     print(f"Built features: {features.shape[0]} rows × {features.shape[1]} columns → {output}")
     context["ti"].xcom_push(key="features_path", value=output)
@@ -94,12 +97,12 @@ def train_model(**context):
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import train_test_split
 
-    features_dir = os.getenv("FEATURES_DIR", "/data/features")
-    models_dir = os.getenv("MODELS_DIR", "/data/models")
-    os.makedirs(models_dir, exist_ok=True)
+    features_dir = paths["features"]
+    models_dir = paths["models"]
+    ensure_dir(models_dir, exist_ok=True)
 
-    features_path = os.path.join(features_dir, "features.csv")
-    if not os.path.exists(features_path):
+    features_path = join_path(features_dir, "features.csv")
+    if not path_exists(features_path):
         raise FileNotFoundError(
             f"TrainError: Features file not found at {features_path}. "
             "build_features task must complete before train_model. "
@@ -131,7 +134,7 @@ def train_model(**context):
     model.fit(X_train, y_train)
     score = model.score(X_test, y_test)
 
-    model_path = os.path.join(models_dir, "model.pkl")
+    model_path = join_path(models_dir, "model.pkl")
     with open(model_path, "wb") as f:
         pickle.dump(model, f)
 
@@ -141,7 +144,7 @@ def train_model(**context):
         "n_test": len(X_test),
         "n_features": X.shape[1],
     }
-    with open(os.path.join(models_dir, "metrics.json"), "w") as f:
+    with open(join_path(models_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
     print(f"Model trained — accuracy: {score:.4f} — n_train: {len(X_train)} — saved to {model_path}")
@@ -160,10 +163,10 @@ def evaluate_model(**context):
     import json
     import os
 
-    models_dir = os.getenv("MODELS_DIR", "/data/models")
-    metrics_path = os.path.join(models_dir, "metrics.json")
+    models_dir = paths["models"]
+    metrics_path = join_path(models_dir, "metrics.json")
 
-    if not os.path.exists(metrics_path):
+    if not path_exists(metrics_path):
         raise FileNotFoundError(
             f"EvaluationError: metrics.json not found at {metrics_path}. "
             "train_model task must complete before evaluate_model."

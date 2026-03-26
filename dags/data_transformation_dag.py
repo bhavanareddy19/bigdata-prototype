@@ -14,6 +14,10 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_io import ensure_dir, join_path, path_exists
+from utils.storage_paths import build_paths
+
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -35,22 +39,22 @@ def clean_data(**context):
 
     import pandas as pd
 
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    staging = os.getenv("STAGING_ZONE", "/data/staging")
-    os.makedirs(staging, exist_ok=True)
+    raw_zone = paths["raw"]
+    staging = paths["staging"]
+    ensure_dir(staging, exist_ok=True)
 
-    if not os.path.exists(raw_zone):
+    if not path_exists(raw_zone):
         print(f"Raw zone not found: {raw_zone} — skipping (run data_ingestion first)")
         return 0
 
     processed = 0
     errors = []
 
-    for f in os.listdir(raw_zone):
+    for f in join_path(raw_zone):
         if not f.endswith(".csv") or f.startswith("."):
             continue
 
-        filepath = os.path.join(raw_zone, f)
+        filepath = join_path(raw_zone, f)
         df = pd.read_csv(filepath)
 
         # Normalize column names first
@@ -98,7 +102,7 @@ def clean_data(**context):
             )
             continue
 
-        out_path = os.path.join(staging, f"cleaned_{f}")
+        out_path = join_path(staging, f"cleaned_{f}")
         df.to_csv(out_path, index=False)
         processed += 1
         print(f"Cleaned {f}: {len(df)} rows → {out_path}")
@@ -125,11 +129,11 @@ def transform_aggregate(**context):
 
     import pandas as pd
 
-    staging = os.getenv("STAGING_ZONE", "/data/staging")
-    processed_zone = os.getenv("PROCESSED_ZONE", "/data/processed")
-    os.makedirs(processed_zone, exist_ok=True)
+    staging = paths["staging"]
+    processed_zone = paths["processed"]
+    ensure_dir(processed_zone, exist_ok=True)
 
-    cleaned_files = [f for f in os.listdir(staging) if f.startswith("cleaned_") and f.endswith(".csv")]
+    cleaned_files = [f for f in join_path(staging) if f.startswith("cleaned_") and f.endswith(".csv")]
 
     if not cleaned_files:
         raise FileNotFoundError(
@@ -140,7 +144,7 @@ def transform_aggregate(**context):
 
     dfs = []
     for f in cleaned_files:
-        dfs.append(pd.read_csv(os.path.join(staging, f)))
+        dfs.append(pd.read_csv(join_path(staging, f)))
 
     combined = pd.concat(dfs, ignore_index=True)
     print(f"Loaded {len(combined)} total rows from {len(dfs)} cleaned file(s)")
@@ -154,8 +158,8 @@ def transform_aggregate(**context):
         )
 
     agg = combined.groupby("status").agg("count").reset_index()
-    agg.to_csv(os.path.join(processed_zone, "status_aggregation.csv"), index=False)
-    combined.to_csv(os.path.join(processed_zone, "combined_data.csv"), index=False)
+    agg.to_csv(join_path(processed_zone, "status_aggregation.csv"), index=False)
+    combined.to_csv(join_path(processed_zone, "combined_data.csv"), index=False)
 
     print(f"Aggregated {len(combined)} rows by status → {len(agg)} groups")
     print(f"Status breakdown:\n{agg.to_string(index=False)}")
@@ -171,11 +175,11 @@ def enrich_with_metadata(**context):
 
     import pandas as pd
 
-    processed_zone = os.getenv("PROCESSED_ZONE", "/data/processed")
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
-    os.makedirs(curated_zone, exist_ok=True)
+    processed_zone = paths["processed"]
+    curated_zone = paths["curated"]
+    ensure_dir(curated_zone, exist_ok=True)
 
-    csv_files = [f for f in os.listdir(processed_zone) if f.endswith(".csv") and not f.startswith(".")]
+    csv_files = [f for f in join_path(processed_zone) if f.endswith(".csv") and not f.startswith(".")]
 
     if not csv_files:
         raise FileNotFoundError(
@@ -186,11 +190,11 @@ def enrich_with_metadata(**context):
 
     enriched = 0
     for f in csv_files:
-        df = pd.read_csv(os.path.join(processed_zone, f))
+        df = pd.read_csv(join_path(processed_zone, f))
         df["_processed_at"] = datetime.utcnow().isoformat()
         df["_source_file"] = f
         df["_pipeline_version"] = "1.0.0"
-        out_path = os.path.join(curated_zone, f"curated_{f}")
+        out_path = join_path(curated_zone, f"curated_{f}")
         df.to_csv(out_path, index=False)
         enriched += 1
         print(f"Enriched {f} ({len(df)} rows) → {out_path}")

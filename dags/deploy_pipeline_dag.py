@@ -10,6 +10,9 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from utils.storage_paths import build_paths
+
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -47,7 +50,7 @@ def notify_observability_agent(**context):
 
     import requests
 
-    backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000").strip()
     dag_run = context.get("dag_run")
 
     payload = {

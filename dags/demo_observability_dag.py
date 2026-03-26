@@ -16,6 +16,10 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_io import join_path, path_exists
+from utils.storage_paths import build_paths
+
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -29,8 +33,8 @@ def task_ok(**context):
     """This task succeeds — it represents a healthy upstream step."""
     print("=== task_ok: Reading sample data from landing zone ===")
     import os
-    landing = os.getenv("LANDING_ZONE", "/data/landing")
-    files = os.listdir(landing) if os.path.exists(landing) else []
+    landing = paths["landing"]
+    files = join_path(landing) if path_exists(landing) else []
     print(f"Found {len(files)} files in landing zone: {files}")
     print("task_ok: SUCCESS")
 
@@ -45,12 +49,12 @@ def task_fail_data(**context):
     import pandas as pd
 
     # This file won't exist unless data_transformation already ran
-    expected_file = os.getenv("CURATED_ZONE", "/data/curated") + "/curated_combined_data.csv"
+    expected_file = paths["curated"] + "/curated_combined_data.csv"
 
     print(f"=== task_fail_data: Loading curated dataset ===")
     print(f"Looking for: {expected_file}")
 
-    if not os.path.exists(expected_file):
+    if not path_exists(expected_file):
         raise FileNotFoundError(
             f"Required dataset not found: {expected_file}\n"
             f"This usually means the data_transformation DAG has not run yet, "

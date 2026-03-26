@@ -13,6 +13,10 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_paths import build_paths
+from utils.storage_io import ensure_dir, get_size, list_files, join_path, copy_file, write_text, path_exists
+
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -34,17 +38,17 @@ def ingest_csv_files(**context):
     import os
     import shutil
 
-    landing = os.getenv("LANDING_ZONE", "/data/landing")
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    os.makedirs(raw_zone, exist_ok=True)
+    landing = paths["landing"]
+    raw_zone = paths["raw"]
+    ensure_dir(raw_zone)
 
     files = []
-    if os.path.exists(landing):
-        for f in os.listdir(landing):
+    if path_exists(landing):
+        for f in list_files(landing):
             if f.endswith(".csv"):
-                src = os.path.join(landing, f)
-                dst = os.path.join(raw_zone, f)
-                shutil.copy2(src, dst)
+                src = join_path(landing, f)
+                dst = join_path(raw_zone, f)
+                copy_file(src, dst)
                 files.append(f)
 
     context["ti"].xcom_push(key="ingested_files", value=files)
@@ -57,9 +61,8 @@ def ingest_api_data(**context):
     import json
     import os
 
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    os.makedirs(raw_zone, exist_ok=True)
-
+    raw_zone = paths["raw"]
+    ensure_dir(raw_zone)
     # Simulate API response
     sample_data = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -70,10 +73,8 @@ def ingest_api_data(**context):
         ],
     }
 
-    output_path = os.path.join(raw_zone, f"api_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
-    with open(output_path, "w") as f:
-        json.dump(sample_data, f, indent=2)
-
+    output_path = join_path(raw_zone, f"api_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+    write_text(output_path, json.dumps(sample_data, indent=2))
     print(f"Ingested API data to {output_path}")
     return output_path
 
@@ -90,23 +91,23 @@ def validate_raw_data(**context):
 
     import pandas as pd
 
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    if not os.path.exists(raw_zone):
+    raw_zone = paths["raw"]
+    if not path_exists(raw_zone):
         raise FileNotFoundError(f"Raw zone does not exist: {raw_zone}")
 
-    all_files = [f for f in os.listdir(raw_zone) if not f.startswith(".")]
+    all_files = [f for f in list_files(raw_zone) if not f.startswith(".")]
     errors = []
 
     # ── 1. Empty file check ──────────────────────────────────
     for f in all_files:
-        fp = os.path.join(raw_zone, f)
-        if os.path.getsize(fp) == 0:
+        fp = join_path(raw_zone, f)
+        if get_size(fp) == 0:
             errors.append(f"EmptyFileError: {f} is 0 bytes")
 
     # ── 2. Schema validation for known CSV files ─────────────
     for fname, required_cols in REQUIRED_SCHEMAS.items():
-        fpath = os.path.join(raw_zone, fname)
-        if not os.path.exists(fpath):
+        fpath = join_path(raw_zone, fname)
+        if not path_exists(fpath):
             # Not present yet — soft warning (ingest may not have run)
             print(f"WARNING: expected file {fname} not found in raw zone")
             continue
@@ -131,8 +132,8 @@ def validate_raw_data(**context):
             )
 
     # ── 3. Data type checks for critical columns ─────────────
-    sales_path = os.path.join(raw_zone, "sales_data.csv")
-    if os.path.exists(sales_path):
+    sales_path = join_path(raw_zone, "sales_data.csv")
+    if path_exists(sales_path):
         try:
             df = pd.read_csv(sales_path)
             if "price" in df.columns:
