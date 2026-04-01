@@ -4,7 +4,7 @@ import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
+from .ops_sync import sync_airflow_ops, get_ops_summary
 from .airflow_logs import fetch_airflow_task_logs
 from .chat_agent import chat
 from .embedding_pipeline import get_index_stats, index_codebase, index_log_entry
@@ -162,3 +162,27 @@ def lineage_graph(req: LineageRequest):
 def lineage_sync(namespace: str = "bigdata-platform"):
     count = sync_lineage_to_vectordb(namespace)
     return {"synced_events": count}
+
+@app.post("/ops/sync-airflow")
+def ops_sync_airflow():
+    return sync_airflow_ops()
+
+
+@app.get("/ops/summary")
+def ops_summary():
+    return get_ops_summary()
+
+
+@app.get("/ops/latest-failures")
+def ops_latest_failures():
+    data = get_ops_summary()
+    return {"recent_failures": data.get("recent_failures", [])}
+
+
+@app.get("/ops/dag-status/{dag_id}")
+def ops_dag_status(dag_id: str):
+    data = get_ops_summary()
+    for dag in data.get("dags", []):
+        if dag.get("dag_id") == dag_id:
+            return dag
+    raise HTTPException(status_code=404, detail=f"No cached status for dag_id={dag_id}")

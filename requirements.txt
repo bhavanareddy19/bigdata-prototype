@@ -26,4 +26,5 @@ scikit-learn>=1.4.0
 pytest>=8.0
 httpx>=0.27
 
-google-cloud-storage>=2.10.0
+google-cloud-storage>=2.10.
+google-auth

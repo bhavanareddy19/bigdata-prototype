@@ -1,0 +1,14 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "-f",
+        "docker/Dockerfile.frontend",
+        "-t",
+        "us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest",
+        "."
+      ]
+
+images:
+  - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest

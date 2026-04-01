@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-
+from .ops_store import load_ops_snapshot, save_ops_snapshot
 from .airflow_logs import fetch_airflow_task_logs
 from .k8s_logs import fetch_k8s_pod_logs
 from .llm_client import llm_available
@@ -20,6 +20,14 @@ def _workspace_root() -> str:
     here = os.path.abspath(os.path.dirname(__file__))
     return os.path.abspath(os.path.join(here, "..", ".."))
 
+def _looks_like_ops_question(question: str) -> bool:
+    q = question.lower()
+    keywords = [
+        "status", "failed", "failure", "recent", "today", "running",
+        "pipeline health", "dag", "task", "ingestion", "transformation",
+        "quality", "ml_pipeline"
+    ]
+    return any(k in q for k in keywords)
 
 def chat(req: ChatRequest) -> ChatResponse:
     repo_root = req.repo_root or _workspace_root()
@@ -29,7 +37,29 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     # ── Optional tool contexts ───────────────────────────────
     tool_notes: list[str] = []
+    if _looks_like_ops_question(req.question):
+        snapshot = load_ops_snapshot()
+        dags = snapshot.get("dags", [])
+        recent_failures = snapshot.get("recent_failures", [])
 
+        if dags:
+            lines = ["Cached pipeline status summary:"]
+            for d in dags:
+                lines.append(
+                    f"- {d.get('dag_id')}: {d.get('latest_state')} "
+                    f"(run={d.get('dag_run_id', 'n/a')})"
+                )
+            if recent_failures:
+                lines.append("\nRecent failures:")
+                for f in recent_failures[:5]:
+                    summary = f.get("summary", {})
+                    lines.append(
+                        f"- {f.get('dag_id')} / {f.get('task_id')}: "
+                        f"{summary.get('root_cause', f.get('state'))}"
+                    )
+            tool_notes.append("\n".join(lines))
+            diagnostics["ops_snapshot_loaded"] = True
+            
     if req.log_text and req.log_text.strip():
         analysis = analyze_logs(log_text=req.log_text, max_lines=400, mode=req.mode)
         diagnostics["log_analysis"] = analysis.model_dump()

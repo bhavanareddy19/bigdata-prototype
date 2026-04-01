@@ -1,0 +1,14 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "-f",
+        "docker/Dockerfile.backend",
+        "-t",
+        "us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:opsfix-20260401-015136",
+        "."
+      ]
+
+images:
+  - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:opsfix-20260401-015136

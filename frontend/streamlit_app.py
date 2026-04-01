@@ -5,17 +5,54 @@ import os
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+import google.auth.transport.requests
+import google.oauth2.id_token
 
 
 load_dotenv()
-
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
 
+
+def get_auth_headers() -> dict:
+    # Local dev: no Cloud Run auth needed
+    if "run.app" not in BACKEND_URL and ".a.run.app" not in BACKEND_URL:
+        return {}
+
+    auth_req = google.auth.transport.requests.Request()
+    token = google.oauth2.id_token.fetch_id_token(auth_req, BACKEND_URL)
+    return {"Authorization": f"Bearer {token}"}
+
+
+def backend_get(path: str, timeout: int = 60):
+    return requests.get(
+        f"{st.session_state.backend_url}{path}",
+        headers=get_auth_headers(),
+        timeout=timeout,
+    )
+
+
+def backend_post(path: str, payload=None, timeout: int = 180):
+    return requests.post(
+        f"{st.session_state.backend_url}{path}",
+        json=payload,
+        headers=get_auth_headers(),
+        timeout=timeout,
+    )
+
+
+def backend_post_raw(path: str, timeout: int = 60):
+    return requests.post(
+        f"{st.session_state.backend_url}{path}",
+        headers=get_auth_headers(),
+        timeout=timeout,
+    )
 st.set_page_config(page_title="BigData Platform — Observability Agent", layout="wide")
 
 st.title("BigData Platform — Observability Agent")
 st.caption(
-    "RAG-powered chatbot using ChromaDB + Ollama (LLaMA 3.1). "
+    "AI-powered observability assistant for DAGs, lineage, deployments, and logs."
+)
+st.caption(
     "Ask about your code, DAGs, deployments, lineage, or paste logs for analysis."
 )
 
@@ -33,7 +70,7 @@ with st.sidebar:
     with col1:
         if st.button("Index Codebase", use_container_width=True):
             try:
-                resp = requests.post(f"{st.session_state.backend_url}/index/codebase", json={"reset": False}, timeout=120)
+                resp = backend_post("/index/codebase", payload={"reset": False}, timeout=120)
                 resp.raise_for_status()
                 data = resp.json()
                 st.success(f"Indexed {data.get('indexed_chunks', 0)} code chunks")
@@ -42,7 +79,7 @@ with st.sidebar:
     with col2:
         if st.button("View Stats", use_container_width=True):
             try:
-                resp = requests.get(f"{st.session_state.backend_url}/index/stats", timeout=10)
+                resp = backend_get("/index/stats", timeout=10)
                 resp.raise_for_status()
                 stats = resp.json()
                 st.json(stats)
@@ -53,7 +90,7 @@ with st.sidebar:
     st.subheader("Lineage (Marquez)")
     if st.button("Sync Lineage to VectorDB", use_container_width=True):
         try:
-            resp = requests.post(f"{st.session_state.backend_url}/lineage/sync?namespace=bigdata-platform", timeout=30)
+            resp = backend_post_raw("/lineage/sync?namespace=bigdata-platform", timeout=30)
             resp.raise_for_status()
             data = resp.json()
             st.success(f"Synced {data.get('synced_events', 0)} lineage events")
@@ -137,7 +174,7 @@ if question:
 
     with st.chat_message("assistant"):
         try:
-            resp = requests.post(f"{st.session_state.backend_url}/chat", json=payload, timeout=180)
+            resp = backend_post("/chat", payload=payload, timeout=120)
             resp.raise_for_status()
             data = resp.json()
             answer = data.get("answer", "(no answer)")
