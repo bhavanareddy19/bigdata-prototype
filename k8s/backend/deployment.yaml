@@ -6,12 +6,14 @@ metadata:
   namespace: backend
 data:
   OLLAMA_BASE_URL: "http://ollama.backend.svc.cluster.local:11434"
-  OLLAMA_MODEL: "llama3.1:8b"
+  OLLAMA_MODEL: "llama3.2:1b"
   EMBEDDING_MODEL: "all-MiniLM-L6-v2"
   CHROMADB_MODE: "local"
   CHROMADB_PERSIST_DIR: "/data/chromadb"
   MARQUEZ_URL: "http://marquez-api.data.svc.cluster.local:5000"
   AIRFLOW_BASE_URL: "http://airflow-webserver.airflow.svc.cluster.local:8080"
+  AIRFLOW_USERNAME: "admin"
+  AIRFLOW_PASSWORD: "admin"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -21,7 +23,7 @@ metadata:
   labels:
     app: backend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: backend
@@ -44,11 +46,11 @@ spec:
               mountPath: /data/chromadb
           resources:
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: "100m"
+              memory: "256Mi"
             limits:
-              cpu: "1000m"
-              memory: "2Gi"
+              cpu: "500m"
+              memory: "1Gi"
           livenessProbe:
             httpGet:
               path: /health
@@ -77,7 +79,7 @@ spec:
   ports:
     - port: 8000
       targetPort: 8000
-  type: ClusterIP
+  type: NodePort
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -85,8 +87,9 @@ metadata:
   name: chromadb-pvc
   namespace: backend
 spec:
+  storageClassName: standard-rwo
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 2Gi

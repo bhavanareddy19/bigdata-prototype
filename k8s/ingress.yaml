@@ -1,18 +1,22 @@
 # Ingress — expose Frontend, Backend, Airflow, and Marquez Web externally
+# GKE uses the built-in GCE Ingress controller by default
+# For local/minikube, change ingressClassName to "nginx"
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: bigdata-platform-ingress
   namespace: backend
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    kubernetes.io/ingress.class: "gce"
 spec:
-  ingressClassName: nginx
+  defaultBackend:
+    service:
+      name: frontend
+      port:
+        number: 8501
   rules:
     # Frontend UI
-    - host: bigdata.local
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -21,11 +25,7 @@ spec:
                 name: frontend
                 port:
                   number: 8501
-    # Backend API
-    - host: api.bigdata.local
-      http:
-        paths:
-          - path: /
+          - path: /api
             pathType: Prefix
             backend:
               service:
@@ -39,12 +39,10 @@ metadata:
   name: airflow-ingress
   namespace: airflow
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: "gce"
 spec:
-  ingressClassName: nginx
   rules:
-    - host: airflow.bigdata.local
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -60,12 +58,10 @@ metadata:
   name: marquez-ingress
   namespace: data
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: "gce"
 spec:
-  ingressClassName: nginx
   rules:
-    - host: lineage.bigdata.local
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix

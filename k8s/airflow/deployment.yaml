@@ -1,4 +1,5 @@
 # Airflow — Webserver + Scheduler + Worker + Redis
+# BUDGET: minimized for $50 GCP education credits
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,6 +12,9 @@ data:
   AIRFLOW__CELERY__RESULT_BACKEND: "db+postgresql://airflow:airflow@postgres.data.svc.cluster.local:5432/airflow"
   AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+  AIRFLOW__CORE__FERNET_KEY: "qzSQcblwwHm_msLLg5iEf8Tth45rbXyjN4K9EKnWLwI="
+  AIRFLOW__WEBSERVER__SECRET_KEY: "bigdata-platform-secret-key-change-in-prod"
+  AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
   # OpenLineage
   OPENLINEAGE_URL: "http://marquez-api.data.svc.cluster.local:5000"
   OPENLINEAGE_NAMESPACE: "bigdata-platform"
@@ -47,13 +51,23 @@ spec:
           image: redis:7-alpine
           ports:
             - containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "50m"
+              memory: "64Mi"
             limits:
-              cpu: "500m"
-              memory: "256Mi"
+              cpu: "200m"
+              memory: "128Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -110,17 +124,23 @@ spec:
                 name: airflow-config
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "200m"
+              memory: "512Mi"
             limits:
-              cpu: "2000m"
-              memory: "2Gi"
+              cpu: "1000m"
+              memory: "1Gi"
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 60
+            initialDelaySeconds: 90
             periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -133,7 +153,7 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-  type: ClusterIP
+  type: NodePort
 ---
 # Airflow Scheduler
 apiVersion: apps/v1
@@ -171,13 +191,13 @@ spec:
                 name: airflow-config
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "200m"
+              memory: "512Mi"
             limits:
-              cpu: "2000m"
-              memory: "2Gi"
+              cpu: "1000m"
+              memory: "1Gi"
 ---
-# Airflow Worker
+# Airflow Worker — single replica to save costs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -186,7 +206,7 @@ metadata:
   labels:
     app: airflow-worker
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: airflow-worker
@@ -216,11 +236,11 @@ spec:
               mountPath: /data
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "200m"
+              memory: "512Mi"
             limits:
-              cpu: "2000m"
-              memory: "4Gi"
+              cpu: "1000m"
+              memory: "2Gi"
       volumes:
         - name: data-lake
           persistentVolumeClaim:
@@ -232,8 +252,9 @@ metadata:
   name: data-lake-pvc
   namespace: airflow
 spec:
+  storageClassName: standard-rwo
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
-      storage: 50Gi
+      storage: 10Gi

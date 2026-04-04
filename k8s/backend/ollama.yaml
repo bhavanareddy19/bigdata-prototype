@@ -26,15 +26,11 @@ spec:
               mountPath: /root/.ollama
           resources:
             requests:
-              cpu: "1000m"
-              memory: "4Gi"
+              cpu: "250m"
+              memory: "1Gi"
             limits:
-              cpu: "4000m"
-              memory: "8Gi"
-          # Uncomment for GPU support:
-          # resources:
-          #   limits:
-          #     nvidia.com/gpu: 1
+              cpu: "2000m"
+              memory: "3Gi"
       volumes:
         - name: ollama-models
           persistentVolumeClaim:
@@ -59,8 +55,9 @@ metadata:
   name: ollama-models-pvc
   namespace: backend
 spec:
+  storageClassName: standard-rwo
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 20Gi
+      storage: 5Gi
