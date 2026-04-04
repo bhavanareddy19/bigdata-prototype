@@ -25,9 +25,58 @@ def _looks_like_ops_question(question: str) -> bool:
     keywords = [
         "status", "failed", "failure", "recent", "today", "running",
         "pipeline health", "dag", "task", "ingestion", "transformation",
-        "quality", "ml_pipeline"
+        "quality", "ml_pipeline", "problem", "error", "issue", "broken",
+        "what happened", "which dag", "which pipeline", "down",
     ]
     return any(k in q for k in keywords)
+
+
+def _fetch_live_airflow_status() -> dict[str, Any] | None:
+    """Fetch live status from Airflow API — no cache, real-time."""
+    try:
+        from .ops_sync import build_ops_snapshot
+        snapshot = build_ops_snapshot()
+        # Also save it so future requests can use cache if Airflow is down
+        save_ops_snapshot(snapshot)
+        return snapshot
+    except Exception:
+        return None
+
+
+def _format_airflow_status(snapshot: dict[str, Any]) -> str:
+    """Format Airflow status into readable text for the LLM."""
+    lines = []
+    dags = snapshot.get("dags", [])
+    failures = snapshot.get("recent_failures", [])
+
+    if not dags:
+        return "No Airflow DAG status available."
+
+    lines.append("=== Live Airflow Pipeline Status ===")
+    for d in dags:
+        dag_id = d.get("dag_id", "?")
+        state = d.get("latest_state", "?")
+        icon = "PASS" if state == "success" else "FAIL" if state == "failed" else state.upper()
+        lines.append(f"  [{icon}] {dag_id} (run: {d.get('dag_run_id', 'n/a')})")
+
+        for t in d.get("tasks", []):
+            t_state = t.get("state", "?")
+            t_icon = "ok" if t_state == "success" else "FAILED" if t_state == "failed" else t_state
+            lines.append(f"        task: {t.get('task_id'):30s} -> {t_icon}")
+
+    if failures:
+        lines.append("\n=== Recent Failures (auto-analyzed) ===")
+        for f in failures[:5]:
+            summary = f.get("summary", {})
+            lines.append(
+                f"  DAG: {f.get('dag_id')} / Task: {f.get('task_id')}\n"
+                f"    Root cause: {summary.get('root_cause', 'unknown')}\n"
+                f"    Category: {summary.get('category', '?')}\n"
+                f"    Fix: {', '.join(summary.get('next_actions', ['check logs']))}"
+            )
+
+    return "\n".join(lines)
+
 
 def chat(req: ChatRequest) -> ChatResponse:
     repo_root = req.repo_root or _workspace_root()
@@ -37,29 +86,21 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     # ── Optional tool contexts ───────────────────────────────
     tool_notes: list[str] = []
-    if _looks_like_ops_question(req.question):
-        snapshot = load_ops_snapshot()
-        dags = snapshot.get("dags", [])
-        recent_failures = snapshot.get("recent_failures", [])
 
-        if dags:
-            lines = ["Cached pipeline status summary:"]
-            for d in dags:
-                lines.append(
-                    f"- {d.get('dag_id')}: {d.get('latest_state')} "
-                    f"(run={d.get('dag_run_id', 'n/a')})"
-                )
-            if recent_failures:
-                lines.append("\nRecent failures:")
-                for f in recent_failures[:5]:
-                    summary = f.get("summary", {})
-                    lines.append(
-                        f"- {f.get('dag_id')} / {f.get('task_id')}: "
-                        f"{summary.get('root_cause', f.get('state'))}"
-                    )
-            tool_notes.append("\n".join(lines))
-            diagnostics["ops_snapshot_loaded"] = True
-            
+    # Auto-fetch live Airflow status for ops questions
+    if _looks_like_ops_question(req.question):
+        # Try live fetch first, fall back to cached snapshot
+        snapshot = _fetch_live_airflow_status()
+        if not snapshot or not snapshot.get("dags"):
+            snapshot = load_ops_snapshot()
+
+        if snapshot and snapshot.get("dags"):
+            status_text = _format_airflow_status(snapshot)
+            tool_notes.append(status_text)
+            diagnostics["airflow_live_status"] = True
+            diagnostics["dags_checked"] = len(snapshot.get("dags", []))
+            diagnostics["failures_found"] = len(snapshot.get("recent_failures", []))
+
     if req.log_text and req.log_text.strip():
         analysis = analyze_logs(log_text=req.log_text, max_lines=400, mode=req.mode)
         diagnostics["log_analysis"] = analysis.model_dump()
@@ -155,7 +196,7 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     parts: list[str] = []
     parts.append("Ollama is not running — returning grounded context + tool summaries.")
-    parts.append("Start Ollama (`ollama serve`) and pull a model (`ollama pull llama3.1:8b`) for RAG answers.\n")
+    parts.append("Start Ollama (`ollama serve`) and pull a model (`ollama pull llama3.2:1b`) for RAG answers.\n")
     if tool_notes:
         parts.append("\n".join(tool_notes))
     if repo_snips:

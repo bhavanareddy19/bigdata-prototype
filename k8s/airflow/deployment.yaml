@@ -15,7 +15,8 @@ data:
   AIRFLOW__CORE__FERNET_KEY: "qzSQcblwwHm_msLLg5iEf8Tth45rbXyjN4K9EKnWLwI="
   AIRFLOW__WEBSERVER__SECRET_KEY: "bigdata-platform-secret-key-change-in-prod"
   AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
-  # OpenLineage
+  # OpenLineage — disabled for local testing, enable for GKE
+  OPENLINEAGE_DISABLED: "true"
   OPENLINEAGE_URL: "http://marquez-api.data.svc.cluster.local:5000"
   OPENLINEAGE_NAMESPACE: "bigdata-platform"
   # Data zones
@@ -153,7 +154,7 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-  type: NodePort
+  type: ClusterIP
 ---
 # Airflow Scheduler
 apiVersion: apps/v1
@@ -237,10 +238,10 @@ spec:
           resources:
             requests:
               cpu: "200m"
-              memory: "512Mi"
+              memory: "1Gi"
             limits:
               cpu: "1000m"
-              memory: "2Gi"
+              memory: "3Gi"
       volumes:
         - name: data-lake
           persistentVolumeClaim:
@@ -252,7 +253,7 @@ metadata:
   name: data-lake-pvc
   namespace: airflow
 spec:
-  storageClassName: standard-rwo
+  # storageClassName: standard-rwo  # uncomment for GKE
   accessModes:
     - ReadWriteOnce
   resources:

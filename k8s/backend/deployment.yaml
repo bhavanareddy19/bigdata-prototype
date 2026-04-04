@@ -14,6 +14,7 @@ data:
   AIRFLOW_BASE_URL: "http://airflow-webserver.airflow.svc.cluster.local:8080"
   AIRFLOW_USERNAME: "admin"
   AIRFLOW_PASSWORD: "admin"
+  PORT: "8000"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -79,7 +80,7 @@ spec:
   ports:
     - port: 8000
       targetPort: 8000
-  type: NodePort
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -87,7 +88,7 @@ metadata:
   name: chromadb-pvc
   namespace: backend
 spec:
-  storageClassName: standard-rwo
+  # storageClassName: standard-rwo  # uncomment for GKE
   accessModes:
     - ReadWriteOnce
   resources:

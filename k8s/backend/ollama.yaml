@@ -55,7 +55,7 @@ metadata:
   name: ollama-models-pvc
   namespace: backend
 spec:
-  storageClassName: standard-rwo
+  # storageClassName: standard-rwo  # uncomment for GKE
   accessModes:
     - ReadWriteOnce
   resources:

@@ -1,29 +1,41 @@
 from __future__ import annotations
 
-import requests
+import os
 from typing import Any
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
-from .settings import get_airflow_base_url
 
-AUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-CREDENTIALS, _ = google.auth.default(scopes=[AUTH_SCOPE])
-SESSION = AuthorizedSession(CREDENTIALS)
+import requests
+from .settings import get_airflow_base_url
 
 
 def _api(path: str) -> str:
     base = get_airflow_base_url().rstrip("/")
-    return f"{base}/api/v2{path}"
+    return f"{base}/api/v1{path}"
+
+
+def _auth() -> tuple[str, str] | None:
+    user = os.getenv("AIRFLOW_USERNAME", "").strip()
+    pwd = os.getenv("AIRFLOW_PASSWORD", "").strip()
+    if user and pwd:
+        return (user, pwd)
+    return None
 
 
 def _get(path: str, **kwargs: Any) -> dict:
-    resp = SESSION.get(_api(path), timeout=30, **kwargs)
+    resp = requests.get(_api(path), auth=_auth(), timeout=30, **kwargs)
     resp.raise_for_status()
     return resp.json()
 
 
+def list_dags() -> list[dict]:
+    data = _get("/dags")
+    return data.get("dags", [])
+
+
 def list_dag_runs(dag_id: str, limit: int = 5) -> list[dict]:
-    data = _get(f"/dags/{dag_id}/dagRuns", params={"limit": limit})
+    data = _get(f"/dags/{dag_id}/dagRuns", params={
+        "limit": limit,
+        "order_by": "-start_date",
+    })
     return data.get("dag_runs", [])
 
 

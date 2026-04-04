@@ -1,43 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
-from google.cloud import storage
 
-from .settings import get_gcs_data_bucket
-
-OPS_BLOB = "ops/latest_status.json"
-
-
-def _client() -> storage.Client:
-    return storage.Client()
+OPS_FILE = os.getenv("OPS_SNAPSHOT_PATH", "/tmp/ops_latest_status.json")
 
 
 def load_ops_snapshot() -> dict[str, Any]:
-    bucket_name = get_gcs_data_bucket()
-    if not bucket_name:
+    if not os.path.exists(OPS_FILE):
         return {"generated_at": None, "dags": [], "recent_failures": []}
-
-    client = _client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(OPS_BLOB)
-
-    if not blob.exists():
+    try:
+        with open(OPS_FILE) as f:
+            return json.load(f)
+    except Exception:
         return {"generated_at": None, "dags": [], "recent_failures": []}
-
-    return json.loads(blob.download_as_text())
 
 
 def save_ops_snapshot(snapshot: dict[str, Any]) -> None:
-    bucket_name = get_gcs_data_bucket()
-    if not bucket_name:
-        raise ValueError("GCS_DATA_BUCKET is not configured")
-
-    client = _client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(OPS_BLOB)
-    blob.upload_from_string(
-        json.dumps(snapshot, indent=2),
-        content_type="application/json",
-    )
+    with open(OPS_FILE, "w") as f:
+        json.dump(snapshot, f, indent=2)
