@@ -88,19 +88,16 @@ services:
       - marquez-api
     restart: unless-stopped
 
-  # ── Frontend (Streamlit) ───────────────────────────────
+  # ── Frontend (Vite React + nginx) ──────────────────────
   frontend:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
     container_name: frontend
     ports:
-      - "8501:8501"
-    environment:
-      BACKEND_URL: http://backend:8000
+      - "3001:80"
     depends_on:
       backend:
-        # FIXED: frontend waits until backend /health passes
         condition: service_healthy
     restart: unless-stopped
 

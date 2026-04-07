@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(chmod +x:*)"
+      "Bash(chmod +x:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker restart:*)",
+      "Bash(docker compose:*)",
+      "Bash(del:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npx vite build:*)",
+      "Bash(timeout 8 npx vite:*)",
+      "Bash(\"D:\\\\Local Disk D Files\\\\Git files\\\\bigdata-prototype\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install -r \"D:\\\\Local Disk D Files\\\\Git files\\\\bigdata-prototype\\\\requirements.txt\")",
+      "Bash(Remove-Item -Recurse -Force \"D:\\\\Local Disk D Files\\\\Git files\\\\bigdata-prototype\\\\.venv\")"
     ]
   }
 }
