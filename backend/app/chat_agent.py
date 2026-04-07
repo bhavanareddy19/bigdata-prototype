@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from .ops_store import load_ops_snapshot, save_ops_snapshot
+from .ops_store import load_ops_snapshot
 from .airflow_logs import fetch_airflow_task_logs
 from .k8s_logs import fetch_k8s_pod_logs
 from .llm_client import llm_available
@@ -14,7 +14,6 @@ from .log_analyzer import analyze_logs
 from .models import ChatRequest, ChatResponse
 from .rag_engine import rag_query
 from .repo_context import search_repo_snippets
-
 
 def _workspace_root() -> str:
     here = os.path.abspath(os.path.dirname(__file__))
@@ -29,6 +28,59 @@ def _looks_like_ops_question(question: str) -> bool:
     ]
     return any(k in q for k in keywords)
 
+def _format_ops_snapshot_for_user(snapshot: dict) -> str:
+    dags = snapshot.get("dags", [])
+    if not dags:
+        return "No cached pipeline status is available yet."
+ 
+    lines = ["Pipeline status summary:"]
+ 
+    for dag in dags:
+        dag_id = dag.get("dag_id", "unknown")
+        state = dag.get("latest_state", "UNKNOWN")
+ 
+        if dag_id == "data_ingestion":
+            if state == "SUCCESS_FROM_GCS":
+                file_count = dag.get("raw_file_count", 0)
+                sample_files = dag.get("sample_files", [])[:3]
+                short_names = [os.path.basename(f) for f in sample_files]
+ 
+                lines.append(
+                    f"- data_ingestion appears successful based on GCS output: "
+                    f"{file_count} file(s) found in raw/."
+                )
+ 
+                if short_names:
+                    lines.append(
+                        f"  Sample files: {', '.join(short_names)}"
+                    )
+ 
+            elif state == "NO_RAW_OUTPUT":
+                lines.append("- data_ingestion has no raw output yet.")
+ 
+            elif state == "NO_RUNS":
+                lines.append("- data_ingestion has not run yet.")
+ 
+            else:
+                lines.append(f"- data_ingestion status is currently {state}.")
+ 
+        else:
+            lines.append(f"- {dag_id}: {state}")
+ 
+    recent_failures = snapshot.get("recent_failures", [])
+    if recent_failures:
+        lines.append("")
+        lines.append("Recent failures:")
+        for f in recent_failures[:5]:
+            summary = f.get("summary", {})
+            root_cause = summary.get("root_cause") or f.get("state", "failed")
+            lines.append(
+                f"- {f.get('dag_id')} / {f.get('task_id')}: {root_cause}"
+            )
+ 
+    return "\n".join(lines)
+
+
 def chat(req: ChatRequest) -> ChatResponse:
     repo_root = req.repo_root or _workspace_root()
 
@@ -41,23 +93,8 @@ def chat(req: ChatRequest) -> ChatResponse:
         snapshot = load_ops_snapshot()
         dags = snapshot.get("dags", [])
         recent_failures = snapshot.get("recent_failures", [])
-
-        if dags:
-            lines = ["Cached pipeline status summary:"]
-            for d in dags:
-                lines.append(
-                    f"- {d.get('dag_id')}: {d.get('latest_state')} "
-                    f"(run={d.get('dag_run_id', 'n/a')})"
-                )
-            if recent_failures:
-                lines.append("\nRecent failures:")
-                for f in recent_failures[:5]:
-                    summary = f.get("summary", {})
-                    lines.append(
-                        f"- {f.get('dag_id')} / {f.get('task_id')}: "
-                        f"{summary.get('root_cause', f.get('state'))}"
-                    )
-            tool_notes.append("\n".join(lines))
+        if snapshot.get("dags"):
+            tool_notes.append(_format_ops_snapshot_for_user(snapshot))
             diagnostics["ops_snapshot_loaded"] = True
             
     if req.log_text and req.log_text.strip():
@@ -126,7 +163,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     extra_context = "\n".join(tool_notes) if tool_notes else ""
 
     # ── RAG path (preferred) ─────────────────────────────────
-    use_llm = req.mode == "llm" or (req.mode == "auto" and llm_available())
+    use_llm = req.mode in ("llm", "auto")
     if use_llm:
         history = [{"role": m.role, "content": m.content} for m in req.history[-10:]]
         result = rag_query(
@@ -154,8 +191,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     diagnostics["repo_matches"] = len(repo_snips)
 
     parts: list[str] = []
-    parts.append("Ollama is not running — returning grounded context + tool summaries.")
-    parts.append("Start Ollama (`ollama serve`) and pull a model (`ollama pull llama3.1:8b`) for RAG answers.\n")
+    parts.append("LLM generation is currently unavailable — returning grounded context + tool summaries.")
     if tool_notes:
         parts.append("\n".join(tool_notes))
     if repo_snips:

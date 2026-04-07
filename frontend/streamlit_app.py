@@ -13,38 +13,41 @@ load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
 
 
-def get_auth_headers() -> dict:
+def get_auth_headers(base_url: str) -> dict:
     # Local dev: no Cloud Run auth needed
     if "run.app" not in BACKEND_URL and ".a.run.app" not in BACKEND_URL:
         return {}
 
     auth_req = google.auth.transport.requests.Request()
-    token = google.oauth2.id_token.fetch_id_token(auth_req, BACKEND_URL)
+    token = google.oauth2.id_token.fetch_id_token(auth_req, base_url.rstrip("/"))
     return {"Authorization": f"Bearer {token}"}
 
 
 def backend_get(path: str, timeout: int = 60):
+    base_url = st.session_state.backend_url.rstrip("/")
     return requests.get(
-        f"{st.session_state.backend_url}{path}",
-        headers=get_auth_headers(),
+        f"{base_url}{path}",
+        headers=get_auth_headers(base_url),
         timeout=timeout,
     )
 
 
 def backend_post(path: str, payload=None, timeout: int = 180):
+    base_url = st.session_state.backend_url.rstrip("/")
     return requests.post(
-        f"{st.session_state.backend_url}{path}",
-        json=payload,
-        headers=get_auth_headers(),
+        f"{base_url}{path}",
+        headers=get_auth_headers(base_url),
         timeout=timeout,
+        json=payload,
     )
 
 
 def backend_post_raw(path: str, timeout: int = 60):
+    base_url = st.session_state.backend_url.rstrip("/")
     return requests.post(
-        f"{st.session_state.backend_url}{path}",
-        headers=get_auth_headers(),
-        timeout=timeout,
+        f"{base_url}{path}",
+        headers=get_auth_headers(base_url),
+        timeout=timeout
     )
 st.set_page_config(page_title="BigData Platform — Observability Agent", layout="wide")
 

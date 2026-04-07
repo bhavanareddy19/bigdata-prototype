@@ -30,3 +30,7 @@ def list_dag_runs(dag_id: str, limit: int = 5) -> list[dict]:
 def list_task_instances(dag_id: str, dag_run_id: str) -> list[dict]:
     data = _get(f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances")
     return data.get("task_instances", [])
+
+def list_dags(limit: int = 100) -> list[dict]:
+    data = _get("/dags", params={"limit": limit})
+    return data.get("dags", [])

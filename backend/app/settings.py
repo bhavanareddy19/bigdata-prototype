@@ -30,29 +30,27 @@ def get_llm_provider() -> str:
     """
     return os.getenv("LLM_PROVIDER", "ollama").strip().lower()
 
-
 def get_ollama_base_url() -> str:
     return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
-
 
 def get_ollama_model() -> str:
     return os.getenv("OLLAMA_MODEL", "llama3.2:1b").strip()
 
-
 def get_ollama_embed_model() -> str:
     return os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text").strip()
 
-
 def get_vertex_project_id() -> str:
-    return os.getenv("VERTEX_PROJECT_ID", "").strip()
-
+    # Accept either VERTEX_PROJECT_ID or the standard GOOGLE_CLOUD_PROJECT
+    return (
+        os.getenv("VERTEX_PROJECT_ID", "").strip()
+        or os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+    )
 
 def get_vertex_location() -> str:
     return os.getenv("VERTEX_LOCATION", "us-central1").strip()
 
-
 def get_vertex_model() -> str:
-    return os.getenv("VERTEX_MODEL", "gemini-1.5-flash").strip()
+    return os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip()
 
 
 # ── Database / Vector Store ───────────────────────────────
@@ -117,22 +115,32 @@ def get_airflow_password() -> str:
 def get_gcs_data_bucket() -> str:
     return os.getenv("GCS_DATA_BUCKET", "").strip()
 
-
 def get_gcs_landing_prefix() -> str:
     return os.getenv("GCS_LANDING_PREFIX", "landing/").strip()
-
 
 def get_gcs_raw_prefix() -> str:
     return os.getenv("GCS_RAW_PREFIX", "raw/").strip()
 
-
 def get_gcs_staging_prefix() -> str:
     return os.getenv("GCS_STAGING_PREFIX", "staging/").strip()
-
 
 def get_gcs_processed_prefix() -> str:
     return os.getenv("GCS_PROCESSED_PREFIX", "processed/").strip()
 
+def get_gcs_curated_prefix() -> str:
+    return os.getenv("GCS_CURATED_PREFIX", "curated").strip()
+
+def get_gcs_features_prefix() -> str:
+    return os.getenv("GCS_FEATURES_PREFIX", "features").strip()
+
+def get_gcs_models_prefix() -> str:
+    return os.getenv("GCS_MODELS_PREFIX", "models").strip()
+
+def get_google_cloud_project() -> str:
+    return os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+
+def get_google_cloud_location() -> str:
+    return os.getenv("GOOGLE_CLOUD_LOCATION", "global").strip()
 
 # ── Embeddings ────────────────────────────────────────────
 

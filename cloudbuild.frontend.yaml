@@ -1,14 +1,25 @@
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
-      [
-        "build",
-        "-f",
-        "docker/Dockerfile.frontend",
-        "-t",
-        "us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest",
-        "."
-      ]
+      - build
+      - -f
+      - docker/Dockerfile.frontend
+      - -t
+      - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest
+      - .
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - bigdata-frontend
+      - --image=us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8501
+      - --set-env-vars=BACKEND_URL=https://bigdata-backend-a2vn2ihr2a-uc.a.run.app
 
 images:
   - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest

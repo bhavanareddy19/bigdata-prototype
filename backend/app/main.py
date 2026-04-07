@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .ops_sync import sync_airflow_ops, get_ops_summary
 from .airflow_logs import fetch_airflow_task_logs
+from .airflow_status_client import list_dags
 from .chat_agent import chat
 from .embedding_pipeline import get_index_stats, index_codebase, index_log_entry
 from .k8s_logs import fetch_k8s_pod_logs
@@ -35,7 +37,23 @@ def _workspace_root() -> str:
     return os.path.abspath(os.path.join(here, "..", ".."))
 
 
-app = FastAPI(title="BigData Platform — Observability Agent", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Auto-index codebase on every startup so RAG is always ready
+    try:
+        root = _workspace_root()
+        count = index_codebase(root, reset=False)
+        print(f"[startup] auto-indexed {count} chunks from {root}")
+    except Exception as e:
+        print(f"[startup] indexing failed (non-fatal): {e}")
+    yield
+
+
+app = FastAPI(
+    title="BigData Platform — Observability Agent",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -163,6 +181,7 @@ def lineage_sync(namespace: str = "bigdata-platform"):
     count = sync_lineage_to_vectordb(namespace)
     return {"synced_events": count}
 
+
 @app.post("/ops/sync-airflow")
 def ops_sync_airflow():
     return sync_airflow_ops()
@@ -186,3 +205,8 @@ def ops_dag_status(dag_id: str):
         if dag.get("dag_id") == dag_id:
             return dag
     raise HTTPException(status_code=404, detail=f"No cached status for dag_id={dag_id}")
+
+
+@app.get("/ops/list-dags")
+def ops_list_dags():
+    return {"dags": list_dags(100)}

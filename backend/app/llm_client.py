@@ -1,17 +1,19 @@
-"""LLM client — Ollama only (100 % free & open-source).
-
-Uses Ollama HTTP API for both structured-JSON analysis and free-form chat.
-Recommended model: llama3.1:8b  (pull with `ollama pull llama3.1:8b`)
-"""
 from __future__ import annotations
 
+import os
 import json
 import logging
 from typing import Any
 
 import requests
 
-from .settings import get_ollama_base_url, get_ollama_model
+from .settings import (
+    get_llm_provider,
+    get_ollama_base_url,
+    get_ollama_model,
+    get_vertex_model,
+)
+from .llm_vertex import generate_text as vertex_generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +23,31 @@ class LlmNotConfiguredError(RuntimeError):
 
 
 def llm_available() -> bool:
-    """Return True if Ollama is reachable."""
-    try:
-        r = requests.get(f"{get_ollama_base_url()}/api/tags", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
+    provider = get_llm_provider()
+    if provider == "vertex":
+        return True
+    if provider == "ollama":
+        try:
+            r = requests.get(f"{get_ollama_base_url().rstrip('/')}/api/tags", timeout=5)
+            return r.ok
+        except Exception:
+            return False
+    return False
+
+
+def generate_text(prompt: str) -> str:
+    provider = get_llm_provider()
+
+    if provider == "vertex":
+        return vertex_generate_text(prompt, get_vertex_model())
+
+    if provider == "ollama":
+        return call_ollama_chat(
+            messages=[{"role": "user", "content": prompt}],
+            model=get_ollama_model(),
+        )
+
+    raise RuntimeError(f"Unsupported LLM provider: {provider}")
 
 
 def call_ollama_chat(
@@ -36,7 +57,6 @@ def call_ollama_chat(
     temperature: float = 0.2,
     timeout: int = 300,
 ) -> str:
-    """Generic Ollama chat call — returns the assistant text."""
     base_url = get_ollama_base_url()
     mdl = model or get_ollama_model()
     url = f"{base_url.rstrip('/')}/api/chat"
@@ -53,15 +73,18 @@ def call_ollama_chat(
 
 
 def analyze_with_llm(*, prompt: str) -> dict[str, Any]:
-    """Call Ollama expecting STRICT JSON back (for log analysis)."""
-    content = call_ollama_chat(
-        messages=[
-            {"role": "system", "content": "You are a senior SRE/data engineer. Output STRICT JSON only."},
-            {"role": "user", "content": prompt},
-        ],
-    )
+    provider = get_llm_provider()
 
-    # Strip markdown code fences if present
+    if provider == "vertex":
+        content = generate_text(prompt)
+    else:
+        content = call_ollama_chat(
+            messages=[
+                {"role": "system", "content": "You are a senior SRE/data engineer. Output STRICT JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+
     if content.startswith("```"):
         content = content.strip("`")
         if content.lower().startswith("json"):
