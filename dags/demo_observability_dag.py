@@ -34,7 +34,7 @@ def task_ok(**context):
     print("=== task_ok: Reading sample data from landing zone ===")
     import os
     landing = paths["landing"]
-    files = join_path(landing) if path_exists(landing) else []
+    files = list_files(landing) if path_exists(landing) else []
     print(f"Found {len(files)} files in landing zone: {files}")
     print("task_ok: SUCCESS")
 
@@ -108,7 +108,7 @@ with DAG(
     dag_id="demo_observability",
     default_args=default_args,
     description="Demo DAG that intentionally fails — for testing the AI observability chatbot",
-    schedule=None,  # Manual trigger only
+    schedule="@daily",  # Manual trigger only
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["demo", "observability"],

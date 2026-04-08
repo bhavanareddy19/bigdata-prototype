@@ -73,7 +73,7 @@ with DAG(
     dag_id="deploy_pipeline",
     default_args=default_args,
     description="Build, test, and deploy services to Kubernetes",
-    schedule_interval=None,  # Triggered manually or by upstream DAG
+    schedule_interval="@weekly",  # Triggered manually or by upstream DAG
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["deploy", "data-platform"],

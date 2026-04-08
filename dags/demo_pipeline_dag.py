@@ -499,7 +499,7 @@ with DAG(
         '{"inject_bad_data": true} for failure demo, '
         '{"inject_bad_data": false} for clean run.'
     ),
-    schedule=None,
+    schedule="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["demo", "observability", "data-platform"],

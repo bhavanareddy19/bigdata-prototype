@@ -169,7 +169,7 @@ with DAG(
     dag_id="data_ingestion",
     default_args=default_args,
     description="Ingest data from CSV files and APIs into the raw data lake zone",
-    schedule="@hourly",
+    schedule="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["ingestion", "data-platform"],
