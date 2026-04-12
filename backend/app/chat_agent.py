@@ -1,7 +1,3 @@
-"""Chat agent — uses the RAG engine (ChromaDB + Ollama) for answers.
-
-Falls back to grounded repo snippets + tool summaries when the LLM is down.
-"""
 from __future__ import annotations
 
 import os
@@ -32,41 +28,31 @@ def _format_ops_snapshot_for_user(snapshot: dict) -> str:
     dags = snapshot.get("dags", [])
     if not dags:
         return "No cached pipeline status is available yet."
- 
     lines = ["Pipeline status summary:"]
- 
     for dag in dags:
         dag_id = dag.get("dag_id", "unknown")
         state = dag.get("latest_state", "UNKNOWN")
- 
         if dag_id == "data_ingestion":
             if state == "SUCCESS_FROM_GCS":
                 file_count = dag.get("raw_file_count", 0)
                 sample_files = dag.get("sample_files", [])[:3]
                 short_names = [os.path.basename(f) for f in sample_files]
- 
-                lines.append(
-                    f"- data_ingestion appears successful based on GCS output: "
-                    f"{file_count} file(s) found in raw/."
-                )
- 
+                lines.append(f"- data_ingestion appears successful: {file_count} file(s) in raw/.")
                 if short_names:
-                    lines.append(
-                        f"  Sample files: {', '.join(short_names)}"
-                    )
- 
+                    lines.append(f"  Sample files: {', '.join(short_names)}")
             elif state == "NO_RAW_OUTPUT":
                 lines.append("- data_ingestion has no raw output yet.")
- 
             elif state == "NO_RUNS":
                 lines.append("- data_ingestion has not run yet.")
- 
             else:
                 lines.append(f"- data_ingestion status is currently {state}.")
- 
         else:
-            lines.append(f"- {dag_id}: {state}")
- 
+            tasks = dag.get("tasks", [])
+            failed_tasks = [t["task_id"] for t in tasks if t.get("state") == "failed"]
+            if failed_tasks:
+                lines.append(f"- {dag_id}: {state} (failed tasks: {', '.join(failed_tasks)})")
+            else:
+                lines.append(f"- {dag_id}: {state}")
     recent_failures = snapshot.get("recent_failures", [])
     if recent_failures:
         lines.append("")
@@ -74,29 +60,22 @@ def _format_ops_snapshot_for_user(snapshot: dict) -> str:
         for f in recent_failures[:5]:
             summary = f.get("summary", {})
             root_cause = summary.get("root_cause") or f.get("state", "failed")
-            lines.append(
-                f"- {f.get('dag_id')} / {f.get('task_id')}: {root_cause}"
-            )
- 
+            lines.append(f"- {f.get('dag_id')} / {f.get('task_id')}: {root_cause}")
     return "\n".join(lines)
 
 
 def chat(req: ChatRequest) -> ChatResponse:
     repo_root = req.repo_root or _workspace_root()
-
     sources: list[dict[str, str]] = []
     diagnostics: dict[str, Any] = {}
-
-    # ── Optional tool contexts ───────────────────────────────
     tool_notes: list[str] = []
+
     if _looks_like_ops_question(req.question):
         snapshot = load_ops_snapshot()
-        dags = snapshot.get("dags", [])
-        recent_failures = snapshot.get("recent_failures", [])
         if snapshot.get("dags"):
             tool_notes.append(_format_ops_snapshot_for_user(snapshot))
             diagnostics["ops_snapshot_loaded"] = True
-            
+
     if req.log_text and req.log_text.strip():
         analysis = analyze_logs(log_text=req.log_text, max_lines=400, mode=req.mode)
         diagnostics["log_analysis"] = analysis.model_dump()
@@ -121,7 +100,6 @@ def chat(req: ChatRequest) -> ChatResponse:
             diagnostics["k8s"] = {
                 "namespace": req.k8s.namespace,
                 "pod": req.k8s.pod,
-                "container": req.k8s.container,
                 "analysis": analysis.model_dump(),
             }
             tool_notes.append(
@@ -162,36 +140,39 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     extra_context = "\n".join(tool_notes) if tool_notes else ""
 
-    # ── RAG path (preferred) ─────────────────────────────────
     use_llm = req.mode in ("llm", "auto")
     if use_llm:
         history = [{"role": m.role, "content": m.content} for m in req.history[-10:]]
-        result = rag_query(
-            question=req.question,
-            history=history,
-            extra_context=extra_context,
-        )
+        try:
+            result = rag_query(
+                question=req.question,
+                history=history,
+                extra_context=extra_context,
+            )
+            for chunk in result.retrieved_chunks[:8]:
+                sources.append({
+                    "type": chunk.collection,
+                    "path": chunk.metadata.get("file", chunk.metadata.get("dag_id", "")),
+                    "snippet": chunk.document[:500],
+                    "relevance": f"{1 - chunk.distance:.2f}",
+                })
+            diagnostics["rag_chunks"] = len(result.retrieved_chunks)
+            diagnostics["prompt_tokens_approx"] = result.prompt_tokens_approx
+            return ChatResponse(answer=result.answer, sources=sources, diagnostics=diagnostics)
+        except RuntimeError as e:
+            if "rate-limited" in str(e).lower():
+                return ChatResponse(
+                    answer="The AI model is temporarily rate-limited. Please wait a minute and try again.",
+                    sources=[],
+                    diagnostics={"error": "rate_limited"}
+                )
+            raise
 
-        # Build sources from retrieved chunks
-        for chunk in result.retrieved_chunks[:8]:
-            sources.append({
-                "type": chunk.collection,
-                "path": chunk.metadata.get("file", chunk.metadata.get("dag_id", "")),
-                "snippet": chunk.document[:500],
-                "relevance": f"{1 - chunk.distance:.2f}",
-            })
-        diagnostics["rag_chunks"] = len(result.retrieved_chunks)
-        diagnostics["prompt_tokens_approx"] = result.prompt_tokens_approx
-
-        return ChatResponse(answer=result.answer, sources=sources, diagnostics=diagnostics)
-
-    # ── Fallback: no LLM — return grounded context ───────────
     repo_snips = search_repo_snippets(root_dir=repo_root, query=req.question) if req.include_repo_context else []
     sources.extend({"type": "repo", "path": s.path, "snippet": s.snippet} for s in repo_snips)
     diagnostics["repo_matches"] = len(repo_snips)
 
-    parts: list[str] = []
-    parts.append("LLM generation is currently unavailable — returning grounded context + tool summaries.")
+    parts: list[str] = ["LLM generation is currently unavailable — returning grounded context + tool summaries."]
     if tool_notes:
         parts.append("\n".join(tool_notes))
     if repo_snips:

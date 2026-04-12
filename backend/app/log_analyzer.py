@@ -202,7 +202,8 @@ def analyze_logs(*, log_text: str, max_lines: int, mode: str) -> AnalyzeLogRespo
             evidence=heuristic.evidence,
             raw=raw,
         )
-    except Exception:
+    except Exception as llm_err:
+        import logging; logging.getLogger(__name__).error(f"LLM failed: {llm_err}")
         # Don’t fail the pipeline because the LLM failed.
         return AnalyzeLogResponse(
             category=heuristic.category,  # type: ignore[arg-type]

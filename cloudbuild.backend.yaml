@@ -1,31 +1,30 @@
 steps:
-  # Step 1: Build the backend image
   - name: gcr.io/cloud-builders/docker
     args:
-      [
-        "build",
-        "-f",
-        "docker/Dockerfile.backend",
-        "-t",
-        "us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest",
-        "."
-      ]
+      - build
+      - --no-cache
+      - -f
+      - docker/Dockerfile.backend
+      - -t
+      - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend-v2:latest
+      - .
 
-  # Step 2: Deploy to Cloud Run
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       - run
       - deploy
       - bigdata-backend
-      - --image=us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest
+      - --image=us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend-v2:latest
       - --region=us-central1
       - --platform=managed
       - --allow-unauthenticated
       - --memory=2Gi
       - --cpu=1
       - --timeout=300
-      - --set-env-vars=APP_ENV=prod,LLM_PROVIDER=vertex,VERTEX_PROJECT_ID=bda-project-gcp,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash,GOOGLE_CLOUD_PROJECT=bda-project-gcp,GOOGLE_CLOUD_LOCATION=us-central1,GOOGLE_GENAI_USE_VERTEXAI=True,GCS_DATA_BUCKET=bda-project-gcp-data,VECTOR_STORE_PROVIDER=chroma_local,CHROMADB_MODE=local,CHROMADB_PERSIST_DIR=/tmp/chromadb,STORAGE_MODE=gcs,PIPELINE_NAMESPACE=bigdata-platform
+      - --min-instances=1
+      - --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+      - --set-env-vars=APP_ENV=prod,LLM_PROVIDER=vertex,VERTEX_PROJECT_ID=bda-project-gcp,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,GOOGLE_CLOUD_PROJECT=bda-project-gcp,GOOGLE_CLOUD_LOCATION=us-central1,GOOGLE_GENAI_USE_VERTEXAI=True,GCS_DATA_BUCKET=bda-project-bigdata,CHROMADB_MODE=local,CHROMADB_PERSIST_DIR=/tmp/chromadb,AIRFLOW_BASE_URL=https://3d7249feafb548c683a6a11e7186446b-dot-us-central1.composer.googleusercontent.com
 
 images:
-  - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest
+  - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend-v2:latest

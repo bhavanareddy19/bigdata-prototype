@@ -18,10 +18,6 @@ from .llm_vertex import generate_text as vertex_generate_text
 logger = logging.getLogger(__name__)
 
 
-class LlmNotConfiguredError(RuntimeError):
-    pass
-
-
 def llm_available() -> bool:
     provider = get_llm_provider()
     if provider == "vertex":
@@ -75,19 +71,23 @@ def call_ollama_chat(
 def analyze_with_llm(*, prompt: str) -> dict[str, Any]:
     provider = get_llm_provider()
 
+    json_instruction = "\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no backticks, no explanation."
+
     if provider == "vertex":
-        content = generate_text(prompt)
+        content = generate_text(prompt + json_instruction)
     else:
         content = call_ollama_chat(
             messages=[
-                {"role": "system", "content": "You are a senior SRE/data engineer. Output STRICT JSON only."},
+                {"role": "system", "content": "You are a senior SRE/data engineer. Output STRICT JSON only. No markdown."},
                 {"role": "user", "content": prompt},
             ],
         )
 
+    # Strip markdown code fences if present
+    content = content.strip()
     if content.startswith("```"):
-        content = content.strip("`")
-        if content.lower().startswith("json"):
-            content = content[4:].lstrip()
+        lines = content.split("\n")
+        content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+    content = content.strip()
 
     return json.loads(content)

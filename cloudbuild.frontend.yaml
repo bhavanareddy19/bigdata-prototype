@@ -18,8 +18,8 @@ steps:
       - --region=us-central1
       - --platform=managed
       - --allow-unauthenticated
-      - --port=8501
-      - --set-env-vars=BACKEND_URL=https://bigdata-backend-a2vn2ihr2a-uc.a.run.app
+      - --port=8080
+      - --set-env-vars=BACKEND_URL=https://bigdata-backend-770757350817.us-central1.run.app
 
 images:
   - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest
