@@ -2,11 +2,17 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
+      - --no-cache
       - -f
       - docker/Dockerfile.frontend
       - -t
       - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest
       - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/frontend:latest
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud

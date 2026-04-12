@@ -33,16 +33,13 @@ def llm_available() -> bool:
 
 def generate_text(prompt: str) -> str:
     provider = get_llm_provider()
-
     if provider == "vertex":
         return vertex_generate_text(prompt, get_vertex_model())
-
     if provider == "ollama":
         return call_ollama_chat(
             messages=[{"role": "user", "content": prompt}],
             model=get_ollama_model(),
         )
-
     raise RuntimeError(f"Unsupported LLM provider: {provider}")
 
 
