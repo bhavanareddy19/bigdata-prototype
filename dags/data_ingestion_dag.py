@@ -15,6 +15,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from utils.storage_paths import build_paths
 from utils.storage_io import ensure_dir, get_size, list_files, join_path, copy_file, write_text, path_exists
+from utils.lineage import emit_dataset_lineage
 
 paths = build_paths()
 
@@ -53,6 +54,11 @@ def ingest_csv_files(**context):
 
     context["ti"].xcom_push(key="ingested_files", value=files)
     print(f"Ingested {len(files)} CSV files into raw zone: {files}")
+    emit_dataset_lineage(
+        job_name="data_ingestion.ingest_csv_files",
+        inputs=["landing/sales_data.csv", "landing/user_events.csv"],
+        outputs=["raw/sales_data.csv", "raw/user_events.csv"],
+    )
     return len(files)
 
 
@@ -76,6 +82,11 @@ def ingest_api_data(**context):
     output_path = join_path(raw_zone, f"api_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
     write_text(output_path, json.dumps(sample_data, indent=2))
     print(f"Ingested API data to {output_path}")
+    emit_dataset_lineage(
+        job_name="data_ingestion.ingest_api_data",
+        inputs=["external/rest-api"],
+        outputs=["raw/api_data.json"],
+    )
     return output_path
 
 
@@ -163,6 +174,11 @@ def validate_raw_data(**context):
         )
 
     print(f"Validated {len(all_files)} files in raw zone — all checks passed")
+    emit_dataset_lineage(
+        job_name="data_ingestion.validate_raw_data",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv", "raw/api_data.json"],
+        outputs=["raw/validated"],
+    )
 
 
 with DAG(

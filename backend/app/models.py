@@ -68,6 +68,15 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class K8sDiagnoseRequest(BaseModel):
+    namespace: str = Field(..., description="Namespace to diagnose.")
+
+
+class K8sDescribePodRequest(BaseModel):
+    namespace: str
+    pod: str
+
+
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = Field(default_factory=list)
@@ -75,6 +84,7 @@ class ChatRequest(BaseModel):
     # Optional extra context the chat can use as "tools"
     log_text: str | None = None
     k8s: AnalyzeK8sPodRequest | None = None
+    k8s_diagnose: K8sDiagnoseRequest | None = None
     airflow: AnalyzeAirflowTaskRequest | None = None
 
     # Grounding

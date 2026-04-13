@@ -16,6 +16,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from utils.storage_io import ensure_dir, join_path, path_exists
 from utils.storage_paths import build_paths
+from utils.lineage import emit_dataset_lineage
 
 paths = build_paths()
 
@@ -115,6 +116,11 @@ def clean_data(**context):
         )
 
     print(f"Cleaned {processed} files → staging zone")
+    emit_dataset_lineage(
+        job_name="data_transformation.clean_data",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv"],
+        outputs=["staging/cleaned_sales_data.csv", "staging/cleaned_user_events.csv"],
+    )
     return processed
 
 
@@ -163,6 +169,11 @@ def transform_aggregate(**context):
 
     print(f"Aggregated {len(combined)} rows by status → {len(agg)} groups")
     print(f"Status breakdown:\n{agg.to_string(index=False)}")
+    emit_dataset_lineage(
+        job_name="data_transformation.transform_aggregate",
+        inputs=["staging/cleaned_sales_data.csv", "staging/cleaned_user_events.csv"],
+        outputs=["processed/combined_data.csv", "processed/status_aggregation.csv"],
+    )
 
 
 def enrich_with_metadata(**context):
@@ -200,6 +211,11 @@ def enrich_with_metadata(**context):
         print(f"Enriched {f} ({len(df)} rows) → {out_path}")
 
     print(f"Enrichment complete: {enriched} file(s) written to curated zone")
+    emit_dataset_lineage(
+        job_name="data_transformation.enrich_with_metadata",
+        inputs=["processed/combined_data.csv", "processed/status_aggregation.csv"],
+        outputs=["curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+    )
 
 
 with DAG(

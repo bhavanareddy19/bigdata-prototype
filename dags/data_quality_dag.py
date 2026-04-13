@@ -17,6 +17,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from utils.storage_paths import build_paths
 from utils.storage_io import ensure_dir, list_files, join_path, copy_file, write_text, path_exists
+from utils.lineage import emit_dataset_lineage
 paths = build_paths()
 
 default_args = {
@@ -71,6 +72,11 @@ def check_schema_conformance(**context):
         raise ValueError("Schema conformance FAILED:\n" + "\n".join(f"  {e}" for e in errors))
 
     print(f"Schema conformance PASSED — checked {len(csv_files)} file(s)")
+    emit_dataset_lineage(
+        job_name="data_quality_checks.check_schema_conformance",
+        inputs=["curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+        outputs=[],
+    )
 
 
 def check_null_ratios(**context):
@@ -116,6 +122,11 @@ def check_null_ratios(**context):
         )
 
     print(f"Null ratio check PASSED — all columns below {threshold:.0%} null threshold")
+    emit_dataset_lineage(
+        job_name="data_quality_checks.check_null_ratios",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=[],
+    )
 
 
 def check_row_counts(**context):
@@ -148,6 +159,11 @@ def check_row_counts(**context):
         raise ValueError("Row count check FAILED:\n" + "\n".join(f"  {e}" for e in errors))
 
     print(f"Row count check PASSED — all datasets have >= {min_rows} rows")
+    emit_dataset_lineage(
+        job_name="data_quality_checks.check_row_counts",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=[],
+    )
 
 
 def check_duplicates(**context):
@@ -191,6 +207,11 @@ def check_duplicates(**context):
         raise ValueError("Duplicate check FAILED:\n" + "\n".join(f"  {v}" for v in violations))
 
     print(f"Duplicate check PASSED — all datasets below {max_dup_ratio:.0%} duplicate threshold")
+    emit_dataset_lineage(
+        job_name="data_quality_checks.check_duplicates",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=[],
+    )
 
 
 with DAG(

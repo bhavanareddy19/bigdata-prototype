@@ -38,8 +38,8 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from utils.storage_io import ensure_dir, join_path, path_exists
-from utils.storage_io import join_path
 from utils.storage_paths import build_paths
+from utils.lineage import emit_dataset_lineage
 paths = build_paths()
 
 default_args = {
@@ -99,6 +99,11 @@ def setup_demo_data(**context):
                 print(f"  - {f}")
         print("Expected result: ALL TASKS GREEN")
         print("=" * 60)
+    emit_dataset_lineage(
+        job_name="demo_pipeline.setup_demo_data",
+        inputs=["demo/bad_orders.csv"],
+        outputs=["landing/bad_orders.csv"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -124,6 +129,11 @@ def ingest_all_files(**context):
 
     print(f"Ingested {len(files)} CSV file(s) into raw zone: {files}")
     context["ti"].xcom_push(key="ingested_files", value=files)
+    emit_dataset_lineage(
+        job_name="demo_pipeline.ingest_csv_files",
+        inputs=["landing/sales_data.csv", "landing/user_events.csv"],
+        outputs=["raw/sales_data.csv", "raw/user_events.csv"],
+    )
     return files
 
 
@@ -150,6 +160,11 @@ def ingest_api_records(**context):
     with open(out, "w") as f:
         json.dump(payload, f, indent=2)
     print(f"API data ingested → {out}")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.ingest_api_data",
+        inputs=["external/demo-api"],
+        outputs=["raw/api_demo.json"],
+    )
 
 
 # Known good schemas — any deviation triggers SchemaValidationError
@@ -232,6 +247,11 @@ def validate_ingested_data(**context):
         )
 
     print(f"Validation PASSED for {len(all_csvs)} file(s) in raw zone")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.validate_raw_data",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv", "raw/bad_orders.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -314,6 +334,12 @@ def clean_and_transform(**context):
         df.to_csv(join_path(curated_zone, f"curated_{fname}"), index=False)
 
     print(f"Transformation complete: {len(combined)} rows → curated zone")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.clean_and_transform",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv"],
+        outputs=["processed/combined_data.csv", "processed/status_aggregation.csv",
+                 "curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -387,6 +413,11 @@ def run_quality_checks(**context):
         )
 
     print(f"All quality checks PASSED for {len(csvs)} curated file(s)")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.run_quality_checks",
+        inputs=["curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -467,6 +498,11 @@ def train_and_evaluate(**context):
         )
 
     print(f"ML pipeline PASSED — accuracy: {accuracy:.4f} — model saved")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.train_and_evaluate_model",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=["models/model.pkl", "models/metrics.json"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -485,6 +521,11 @@ def cleanup_demo(**context):
         print("Cleanup: removed bad_orders.csv from landing/ — pipeline restored to clean state")
     else:
         print("Cleanup: nothing to remove — already clean")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.cleanup_demo",
+        inputs=["landing/bad_orders.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────

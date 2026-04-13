@@ -113,6 +113,21 @@ def retrieve(
     return filtered
 
 
+_INTERNAL_FILE_PREFIXES = (
+    "backend/app/",
+    "backend\\app\\",
+    "app/",
+)
+
+
+def _is_internal_backend_file(file_path: str) -> bool:
+    """Return True for internal backend source files that users shouldn't see cited."""
+    if not file_path:
+        return False
+    norm = file_path.replace("\\", "/")
+    return any(norm.startswith(p) for p in ("backend/app/", "app/")) and norm.endswith(".py")
+
+
 def _build_context_block(chunks: list[RetrievedChunk], max_chars: int = 12000) -> str:
     """Build a context string from retrieved chunks."""
     if not chunks:
@@ -122,14 +137,19 @@ def _build_context_block(chunks: list[RetrievedChunk], max_chars: int = 12000) -
     total = 0
 
     for c in chunks:
-        label = c.collection.replace("_", " ").title()
-        source = (
+        file_path = (
             c.metadata.get("file")
             or c.metadata.get("dag_id")
             or c.metadata.get("job_name")
             or ""
         )
-        header = f"[{label}] {source}" if source else f"[{label}]"
+
+        # Skip internal backend Python files — users should never see these cited
+        if _is_internal_backend_file(file_path):
+            continue
+
+        label = c.collection.replace("_", " ").title()
+        header = f"[{label}] {file_path}" if file_path else f"[{label}]"
         block = f"--- {header} (relevance: {1 - c.distance:.2f}) ---\n{c.document}\n"
 
         if total + len(block) > max_chars:
@@ -138,25 +158,31 @@ def _build_context_block(chunks: list[RetrievedChunk], max_chars: int = 12000) -
         blocks.append(block)
         total += len(block)
 
+    if not blocks:
+        return "(No user-relevant indexed context found for this query.)"
+
     return "\n".join(blocks)
 
 
 SYSTEM_PROMPT = """\
-You are a senior SRE / data engineer chatbot for a Big Data platform.
+You are a senior SRE / data engineer assistant for a Big Data platform. You help engineers understand the platform, debug issues, and make sense of pipeline failures.
 
 The platform uses:
-- Apache Airflow for DAG orchestration
-- OpenLineage + Marquez for lineage tracking
-- Cloud Run / FastAPI for backend services
-- ChromaDB for vector retrieval
-- Google Cloud services for storage and deployment
+- Apache Airflow for DAG orchestration (pipelines: data_ingestion, data_transformation, data_quality_checks, ml_pipeline, demo_observability_dag)
+- OpenLineage + Marquez for data lineage tracking
+- FastAPI backend with RAG-powered chat for ops visibility
+- ChromaDB for vector search over logs and pipeline metadata
+- Google Cloud Storage, BigQuery, and GKE for infrastructure
 
-Rules:
-- Answer concisely and practically using the provided context.
-- If logs show an error: explain what happened, likely root cause, and concrete next steps.
-- If asked about the project: answer using the retrieved context snippets.
-- If you are unsure, say so. Do not fabricate information.
-- Reference specific files when possible.
+When answering:
+- Be thorough and descriptive. Explain the "what", "why", and "how" — not just a one-liner.
+- For pipeline/DAG questions: describe what the DAG does, what each task does, what data flows through it, and what to check if something fails.
+- For error/log questions: explain what the error means, why it likely happened, what impact it has, and give step-by-step next actions.
+- For general platform questions: give a full picture with context, not just bullet points. Use examples from the actual DAGs and tasks in this project.
+- Use clear headings or bullet structure when the answer has multiple parts.
+- If you are unsure about something, say so rather than guessing.
+- Never mention internal backend source files (e.g. backend/app/*.py), internal function names, or implementation details the user does not need to act on.
+- Keep the answer user-facing: focus on pipelines, tasks, data, and operational steps.
 """
 
 

@@ -48,7 +48,7 @@ export default function Sidebar() {
       const res = await fetch('/lineage/sync', { method: 'POST' })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
       const data = await res.json()
-      setSyncMsg(`Synced ${data.events_synced ?? '?'} events`)
+      setSyncMsg(`Synced ${data.synced_events ?? 0} events`)
       fetchStats()
     } catch (e) {
       setSyncMsg(`Error: ${e.message}`)

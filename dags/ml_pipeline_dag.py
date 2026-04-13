@@ -17,6 +17,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from utils.storage_paths import build_paths
 from utils.storage_io import ensure_dir, list_files, join_path, copy_file, write_text, path_exists
+from utils.lineage import emit_dataset_lineage
 paths = build_paths()
 
 default_args = {
@@ -80,6 +81,11 @@ def build_features(**context):
     print(f"Built features: {features.shape[0]} rows × {features.shape[1]} columns → {output}")
     context["ti"].xcom_push(key="features_path", value=output)
     context["ti"].xcom_push(key="feature_count", value=features.shape[0])
+    emit_dataset_lineage(
+        job_name="ml_pipeline.build_features",
+        inputs=["curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+        outputs=["features/features.csv"],
+    )
 
 
 def train_model(**context):
@@ -149,6 +155,11 @@ def train_model(**context):
 
     print(f"Model trained — accuracy: {score:.4f} — n_train: {len(X_train)} — saved to {model_path}")
     context["ti"].xcom_push(key="model_accuracy", value=score)
+    emit_dataset_lineage(
+        job_name="ml_pipeline.train_model",
+        inputs=["features/features.csv"],
+        outputs=["models/model.pkl", "models/metrics.json"],
+    )
 
 
 def evaluate_model(**context):
@@ -193,6 +204,11 @@ def evaluate_model(**context):
         )
 
     print(f"Model evaluation PASSED — accuracy {accuracy:.4f} >= threshold {min_accuracy}")
+    emit_dataset_lineage(
+        job_name="ml_pipeline.evaluate_model",
+        inputs=["models/metrics.json"],
+        outputs=[],
+    )
 
 
 with DAG(

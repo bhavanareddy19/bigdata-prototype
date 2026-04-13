@@ -16,8 +16,9 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from utils.storage_io import join_path, path_exists
+from utils.storage_io import join_path, list_files, path_exists
 from utils.storage_paths import build_paths
+from utils.lineage import emit_dataset_lineage
 
 paths = build_paths()
 
@@ -37,6 +38,11 @@ def task_ok(**context):
     files = list_files(landing) if path_exists(landing) else []
     print(f"Found {len(files)} files in landing zone: {files}")
     print("task_ok: SUCCESS")
+    emit_dataset_lineage(
+        job_name="demo_observability.task_ok",
+        inputs=["landing/sales_data.csv", "landing/user_events.csv"],
+        outputs=[],
+    )
 
 
 def task_fail_data(**context):
@@ -75,6 +81,11 @@ def task_fail_data(**context):
         )
 
     print(f"Loaded {len(df)} rows. Columns: {list(df.columns)}")
+    emit_dataset_lineage(
+        job_name="demo_observability.task_fail_data",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=[],
+    )
 
 
 def task_fail_code(**context):
@@ -102,6 +113,11 @@ def task_fail_code(**context):
         total += revenue  # ← TypeError: unsupported operand type(s) for +=: 'float' and 'str'
 
     print(f"Total revenue: {total}")  # Never reached
+    emit_dataset_lineage(
+        job_name="demo_observability.task_fail_code",
+        inputs=["processed/combined_data.csv"],
+        outputs=[],
+    )
 
 
 with DAG(

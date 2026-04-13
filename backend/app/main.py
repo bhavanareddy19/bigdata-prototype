@@ -10,7 +10,14 @@ from .airflow_logs import fetch_airflow_task_logs
 from .airflow_status_client import list_dags
 from .chat_agent import chat
 from .embedding_pipeline import get_index_stats, index_codebase, index_log_entry
-from .k8s_logs import fetch_k8s_pod_logs
+from .k8s_logs import (
+    describe_pod as k8s_describe_pod,
+    diagnose_namespace as k8s_diagnose_namespace,
+    fetch_k8s_pod_logs,
+    list_events as k8s_list_events,
+    list_namespaces as k8s_list_namespaces,
+    list_pods as k8s_list_pods,
+)
 from .lineage_client import (
     get_lineage,
     list_datasets,
@@ -46,6 +53,12 @@ async def lifespan(app: FastAPI):
         print(f"[startup] auto-indexed {count} chunks from {root}")
     except Exception as e:
         print(f"[startup] indexing failed (non-fatal): {e}")
+    # Auto-sync Airflow ops snapshot on startup
+    try:
+        sync_airflow_ops()
+        print("[startup] ops snapshot synced from Airflow")
+    except Exception as e:
+        print(f"[startup] ops sync failed (non-fatal): {e}")
     yield
 
 
@@ -77,7 +90,12 @@ def health() -> dict[str, str]:
 
 @app.post("/analyze-log", response_model=AnalyzeLogResponse)
 def analyze_log(req: AnalyzeLogRequest) -> AnalyzeLogResponse:
-    return analyze_logs(log_text=req.log_text, max_lines=req.max_lines, mode=req.mode)
+    result = analyze_logs(log_text=req.log_text, max_lines=req.max_lines, mode=req.mode)
+    try:
+        index_log_entry(req.log_text, source=req.source or "manual", metadata={"category": result.category})
+    except Exception:
+        pass
+    return result
 
 
 @app.post("/analyze-k8s-pod", response_model=AnalyzeLogResponse)
@@ -92,7 +110,52 @@ def analyze_k8s_pod(req: AnalyzeK8sPodRequest) -> AnalyzeLogResponse:
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch k8s logs: {e}")
-    return analyze_logs(log_text=logs, max_lines=req.max_lines, mode=req.mode)
+    result = analyze_logs(log_text=logs, max_lines=req.max_lines, mode=req.mode)
+    try:
+        index_log_entry(logs, source=f"k8s/{req.namespace}/{req.pod}", metadata={"category": result.category, "namespace": req.namespace, "pod": req.pod})
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/k8s/namespaces")
+def k8s_namespaces():
+    try:
+        return {"namespaces": k8s_list_namespaces()}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unreachable. Enable Docker Desktop Kubernetes or deploy to GKE. Error: {e}")
+
+
+@app.get("/k8s/pods/{namespace}")
+def k8s_pods(namespace: str):
+    try:
+        return {"pods": k8s_list_pods(namespace)}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unreachable. Enable Docker Desktop Kubernetes or deploy to GKE. Error: {e}")
+
+
+@app.get("/k8s/events/{namespace}")
+def k8s_events(namespace: str, limit: int = 50):
+    try:
+        return {"events": k8s_list_events(namespace, limit=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unreachable. Enable Docker Desktop Kubernetes or deploy to GKE. Error: {e}")
+
+
+@app.get("/k8s/diagnose/{namespace}")
+def k8s_diagnose(namespace: str):
+    try:
+        return k8s_diagnose_namespace(namespace)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unreachable. Enable Docker Desktop Kubernetes or deploy to GKE. Error: {e}")
+
+
+@app.get("/k8s/describe/{namespace}/{pod}")
+def k8s_describe(namespace: str, pod: str):
+    try:
+        return k8s_describe_pod(namespace, pod)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unreachable. Enable Docker Desktop Kubernetes or deploy to GKE. Error: {e}")
 
 
 @app.post("/analyze-airflow-task", response_model=AnalyzeLogResponse)
@@ -108,7 +171,12 @@ def analyze_airflow_task(req: AnalyzeAirflowTaskRequest) -> AnalyzeLogResponse:
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch Airflow task logs: {e}")
-    return analyze_logs(log_text=logs, max_lines=req.max_lines, mode=req.mode)
+    result = analyze_logs(log_text=logs, max_lines=req.max_lines, mode=req.mode)
+    try:
+        index_log_entry(logs, source=f"airflow/{req.dag_id}/{req.task_id}", metadata={"category": result.category, "dag_id": req.dag_id, "task_id": req.task_id})
+    except Exception:
+        pass
+    return result
 
 
 # ── Chat (RAG-powered) ──────────────────────────────────────

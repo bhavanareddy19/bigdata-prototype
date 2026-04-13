@@ -132,7 +132,55 @@ def index_codebase(root_dir: str, *, reset: bool = False) -> int:
         total += len(batch)
 
     logger.info("Indexed %d code chunks from %s", total, root_dir)
+
+    # Also index DAG metadata from any dags/ directory found under root_dir
+    dags_dir = os.path.join(root_dir, "dags")
+    if os.path.isdir(dags_dir):
+        dag_count = index_dag_files(dags_dir)
+        logger.info("Indexed %d DAG metadata entries from %s", dag_count, dags_dir)
+
     return total
+
+
+def index_dag_files(dags_dir: str) -> int:
+    """Parse DAG Python files and index their metadata into ChromaDB."""
+    from .vectordb_client import reset_collection
+    reset_collection(COLL_DAG_META)
+
+    count = 0
+    for fname in os.listdir(dags_dir):
+        if not fname.endswith("_dag.py") and not fname.endswith("_pipeline.py"):
+            continue
+        full = os.path.join(dags_dir, fname)
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                src = f.read()
+        except Exception:
+            continue
+
+        # Extract dag_id from dag_id="..." or dag_id='...'
+        dag_id_match = re.search(r'dag_id\s*=\s*["\']([^"\']+)["\']', src)
+        if not dag_id_match:
+            # Fall back to filename without extension
+            dag_id = fname.replace(".py", "")
+        else:
+            dag_id = dag_id_match.group(1)
+
+        # Extract docstring for description
+        doc_match = re.match(r'"""(.*?)"""', src, re.DOTALL)
+        description = doc_match.group(1).strip() if doc_match else f"DAG: {dag_id}"
+
+        # Extract task IDs from task_id="..."
+        tasks = re.findall(r'task_id\s*=\s*["\']([^"\']+)["\']', src)
+
+        # Extract schedule from schedule="..." or schedule_interval="..."
+        sched_match = re.search(r'schedule(?:_interval)?\s*=\s*["\']([^"\']+)["\']', src)
+        schedule = sched_match.group(1) if sched_match else None
+
+        index_dag_metadata(dag_id=dag_id, description=description, tasks=tasks, schedule=schedule)
+        count += 1
+
+    return count
 
 
 # ── Log indexing ─────────────────────────────────────────────

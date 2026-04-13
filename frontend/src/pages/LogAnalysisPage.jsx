@@ -53,7 +53,7 @@ export default function LogAnalysisPage() {
       </button>
 
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
-      <LogResultDisplay result={result} />
+      <LogResultDisplay result={result} chatContext={{ log_text: logText }} />
     </div>
   )
 }

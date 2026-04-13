@@ -1,37 +1,35 @@
-# PostgreSQL — Deployment + Service + PVC (shared by Airflow + Marquez)
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
-  name: postgres-config
+  name: postgres-credentials
   namespace: data
-data:
+type: Opaque
+stringData:
   POSTGRES_USER: airflow
   POSTGRES_PASSWORD: airflow
   POSTGRES_DB: airflow
 ---
 apiVersion: v1
-kind: ConfigMap
+kind: PersistentVolumeClaim
 metadata:
-  name: postgres-init-scripts
+  name: postgres-pvc
   namespace: data
-data:
-  init-marquez-db.sh: |
-    #!/bin/bash
-    set -e
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-      CREATE USER marquez WITH PASSWORD 'marquez';
-      CREATE DATABASE marquez OWNER marquez;
-      GRANT ALL PRIVILEGES ON DATABASE marquez TO marquez;
-    EOSQL
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: postgres
   namespace: data
   labels:
     app: postgres
 spec:
+  serviceName: postgres
   replicas: 1
   selector:
     matchLabels:
@@ -47,32 +45,35 @@ spec:
           ports:
             - containerPort: 5432
           envFrom:
-            - configMapRef:
-                name: postgres-config
+            - secretRef:
+                name: postgres-credentials
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data
-            - name: init-scripts
-              mountPath: /docker-entrypoint-initdb.d
           resources:
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: "100m"
+              memory: "256Mi"
             limits:
-              cpu: "1000m"
-              memory: "1Gi"
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "airflow"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
           livenessProbe:
             exec:
               command: ["pg_isready", "-U", "airflow"]
             initialDelaySeconds: 30
-            periodSeconds: 10
+            periodSeconds: 15
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
             claimName: postgres-pvc
-        - name: init-scripts
-          configMap:
-            name: postgres-init-scripts
 ---
 apiVersion: v1
 kind: Service
@@ -86,15 +87,3 @@ spec:
     - port: 5432
       targetPort: 5432
   type: ClusterIP
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: postgres-pvc
-  namespace: data
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
