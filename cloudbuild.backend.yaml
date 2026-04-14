@@ -1,0 +1,35 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --no-cache
+      - -f
+      - docker/Dockerfile.backend
+      - -t
+      - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - bigdata-backend
+      - --image=us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=2Gi
+      - --cpu=1
+      - --timeout=300
+      - --min-instances=1
+      - --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+      - --set-env-vars=APP_ENV=prod,LLM_PROVIDER=vertex,VERTEX_PROJECT_ID=bda-project-gcp,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,GOOGLE_CLOUD_PROJECT=bda-project-gcp,GOOGLE_CLOUD_LOCATION=us-central1,GCS_DATA_BUCKET=bda-project-bigdata,CHROMADB_MODE=local,CHROMADB_PERSIST_DIR=/tmp/chromadb,AIRFLOW_BASE_URL=https://3d7249feafb548c683a6a11e7186446b-dot-us-central1.composer.googleusercontent.com
+
+images:
+  - us-central1-docker.pkg.dev/bda-project-gcp/bigdata-repo/backend:latest

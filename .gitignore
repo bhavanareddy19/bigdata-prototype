@@ -5,6 +5,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+backend/app/__pycache__/
+frontend/node_modules/
 
 # Virtual environments
 .venv/

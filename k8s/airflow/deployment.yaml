@@ -1,20 +1,30 @@
-# Airflow — Webserver + Scheduler + Worker + Redis
+apiVersion: v1
+kind: Secret
+metadata:
+  name: airflow-secrets
+  namespace: airflow
+type: Opaque
+stringData:
+  AIRFLOW__CORE__FERNET_KEY: "qzSQcblwwHm_msLLg5iEf8Tth45rbXyjN4K9EKnWLwI="
+  AIRFLOW__WEBSERVER__SECRET_KEY: "change-me-in-prod-bigdata-platform"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres.data.svc.cluster.local:5432/airflow"
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: airflow-config
   namespace: airflow
 data:
-  AIRFLOW__CORE__EXECUTOR: "CeleryExecutor"
-  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres.data.svc.cluster.local:5432/airflow"
-  AIRFLOW__CELERY__BROKER_URL: "redis://redis.airflow.svc.cluster.local:6379/0"
-  AIRFLOW__CELERY__RESULT_BACKEND: "db+postgresql://airflow:airflow@postgres.data.svc.cluster.local:5432/airflow"
+  AIRFLOW__CORE__EXECUTOR: "LocalExecutor"
   AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-  # OpenLineage
+  AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  # OpenLineage → Marquez
   OPENLINEAGE_URL: "http://marquez-api.data.svc.cluster.local:5000"
   OPENLINEAGE_NAMESPACE: "bigdata-platform"
-  # Data zones
+  MARQUEZ_URL: "http://marquez-api.data.svc.cluster.local:5000"
+  # Data zone paths (on the shared PVC)
   LANDING_ZONE: "/data/landing"
   RAW_ZONE: "/data/raw"
   STAGING_ZONE: "/data/staging"
@@ -22,53 +32,22 @@ data:
   CURATED_ZONE: "/data/curated"
   FEATURES_DIR: "/data/features"
   MODELS_DIR: "/data/models"
-  BACKEND_URL: "http://backend.backend.svc.cluster.local:8000"
----
-# Redis for Celery
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: airflow
-  labels:
-    app: redis
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-        - name: redis
-          image: redis:7-alpine
-          ports:
-            - containerPort: 6379
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "256Mi"
+  DEMO_DIR: "/data/demo"
+  BACKEND_URL: "http://backend.backend.svc.cluster.local:8080"
 ---
 apiVersion: v1
-kind: Service
+kind: PersistentVolumeClaim
 metadata:
-  name: redis
+  name: airflow-data-pvc
   namespace: airflow
 spec:
-  selector:
-    app: redis
-  ports:
-    - port: 6379
-      targetPort: 6379
-  type: ClusterIP
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
 ---
-# Airflow Webserver
+# ── Airflow Webserver ─────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,6 +57,8 @@ metadata:
     app: airflow-webserver
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: airflow-webserver
@@ -88,39 +69,57 @@ spec:
     spec:
       initContainers:
         - name: db-init
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
+          image: IMAGE_AIRFLOW
+          imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
             - |
-              airflow db migrate &&
-              airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+              set -e
+              airflow db migrate
+              airflow users create \
+                --username admin --password admin \
+                --firstname Admin --lastname User \
+                --role Admin --email admin@example.com || true
+              echo "Airflow DB init complete."
           envFrom:
-            - configMapRef:
-                name: airflow-config
+            - configMapRef: { name: airflow-config }
+            - secretRef:    { name: airflow-secrets }
+          volumeMounts:
+            - name: data-lake
+              mountPath: /data
       containers:
         - name: webserver
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
+          image: IMAGE_AIRFLOW
+          imagePullPolicy: Always
           command: ["airflow", "webserver"]
           ports:
             - containerPort: 8080
           envFrom:
-            - configMapRef:
-                name: airflow-config
+            - configMapRef: { name: airflow-config }
+            - secretRef:    { name: airflow-secrets }
+          volumeMounts:
+            - name: data-lake
+              mountPath: /data
           resources:
             requests:
-              cpu: "500m"
+              cpu: "300m"
               memory: "1Gi"
             limits:
-              cpu: "2000m"
+              cpu: "1000m"
               memory: "2Gi"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
             initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 180
             periodSeconds: 30
+      volumes:
+        - name: data-lake
+          persistentVolumeClaim:
+            claimName: airflow-data-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -131,11 +130,11 @@ spec:
   selector:
     app: airflow-webserver
   ports:
-    - port: 8080
+    - port: 80
       targetPort: 8080
-  type: ClusterIP
+  type: LoadBalancer
 ---
-# Airflow Scheduler
+# ── Airflow Scheduler ─────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -145,6 +144,8 @@ metadata:
     app: airflow-scheduler
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: airflow-scheduler
@@ -154,86 +155,41 @@ spec:
         app: airflow-scheduler
     spec:
       initContainers:
-        - name: db-init
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
-          command: ["airflow", "db", "migrate"]
+        # Wait for webserver init to finish DB migration before scheduler starts
+        - name: wait-for-db
+          image: IMAGE_AIRFLOW
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Waiting for Airflow DB to be ready..."
+              until airflow db check; do
+                echo "DB not ready, sleeping 5s..."
+                sleep 5
+              done
+              echo "DB ready."
           envFrom:
-            - configMapRef:
-                name: airflow-config
+            - configMapRef: { name: airflow-config }
+            - secretRef:    { name: airflow-secrets }
       containers:
         - name: scheduler
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
+          image: IMAGE_AIRFLOW
+          imagePullPolicy: Always
           command: ["airflow", "scheduler"]
           envFrom:
-            - configMapRef:
-                name: airflow-config
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "1Gi"
-            limits:
-              cpu: "2000m"
-              memory: "2Gi"
----
-# Airflow Worker
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: airflow-worker
-  namespace: airflow
-  labels:
-    app: airflow-worker
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: airflow-worker
-  template:
-    metadata:
-      labels:
-        app: airflow-worker
-    spec:
-      initContainers:
-        - name: db-init
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
-          command: ["airflow", "db", "migrate"]
-          envFrom:
-            - configMapRef:
-                name: airflow-config
-      containers:
-        - name: worker
-          image: bigdata-airflow:latest
-          imagePullPolicy: IfNotPresent
-          command: ["airflow", "celery", "worker"]
-          envFrom:
-            - configMapRef:
-                name: airflow-config
+            - configMapRef: { name: airflow-config }
+            - secretRef:    { name: airflow-secrets }
           volumeMounts:
             - name: data-lake
               mountPath: /data
           resources:
             requests:
-              cpu: "500m"
+              cpu: "300m"
               memory: "1Gi"
             limits:
-              cpu: "2000m"
-              memory: "4Gi"
+              cpu: "1000m"
+              memory: "2Gi"
       volumes:
         - name: data-lake
           persistentVolumeClaim:
-            claimName: data-lake-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: data-lake-pvc
-  namespace: airflow
-spec:
-  accessModes:
-    - ReadWriteMany
-  resources:
-    requests:
-      storage: 50Gi
+            claimName: airflow-data-pvc

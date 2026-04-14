@@ -37,6 +37,10 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from utils.storage_io import ensure_dir, join_path, path_exists
+from utils.storage_paths import build_paths
+from utils.lineage import emit_dataset_lineage
+paths = build_paths()
 
 default_args = {
     "owner": "data-platform",
@@ -62,13 +66,13 @@ def setup_demo_data(**context):
     conf = context.get("dag_run").conf or {}
     inject_bad = conf.get("inject_bad_data", False)
 
-    landing = os.getenv("LANDING_ZONE", "/data/landing")
-    demo_dir = "/data/demo"
-    bad_src  = os.path.join(demo_dir, "bad_orders.csv")
-    bad_dst  = os.path.join(landing, "bad_orders.csv")
+    landing = paths["landing"]
+    demo_dir = paths["demo"]
+    bad_src  = join_path(demo_dir, "bad_orders.csv")
+    bad_dst  = join_path(landing, "bad_orders.csv")
 
     if inject_bad:
-        if not os.path.exists(bad_src):
+        if not path_exists(bad_src):
             raise FileNotFoundError(
                 f"Demo bad data file not found at {bad_src}. "
                 "Make sure data/demo/bad_orders.csv exists on the host machine."
@@ -84,17 +88,22 @@ def setup_demo_data(**context):
         print("Expected failures: validate_raw_data, clean_data")
         print("=" * 60)
     else:
-        if os.path.exists(bad_dst):
+        if path_exists(bad_dst):
             os.remove(bad_dst)
             print("DEMO MODE: Removed bad_orders.csv from landing/ (clean run)")
         print("=" * 60)
         print("DEMO MODE: CLEAN RUN — only good data in landing/")
         print("Files present:")
-        for f in os.listdir(landing):
+        for f in join_path(landing):
             if not f.startswith("."):
                 print(f"  - {f}")
         print("Expected result: ALL TASKS GREEN")
         print("=" * 60)
+    emit_dataset_lineage(
+        job_name="demo_pipeline.setup_demo_data",
+        inputs=["demo/bad_orders.csv"],
+        outputs=["landing/bad_orders.csv"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -110,16 +119,21 @@ def ingest_all_files(**context):
     import os
     import shutil
 
-    landing  = os.getenv("LANDING_ZONE", "/data/landing")
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    os.makedirs(raw_zone, exist_ok=True)
+    landing  = paths["landing"]
+    raw_zone = paths["raw"]
+    ensure_dir(raw_zone, exist_ok=True)
 
-    files = [f for f in os.listdir(landing) if f.endswith(".csv") and not f.startswith(".")]
+    files = [f for f in join_path(landing) if f.endswith(".csv") and not f.startswith(".")]
     for f in files:
-        shutil.copy2(os.path.join(landing, f), os.path.join(raw_zone, f))
+        shutil.copy2(join_path(landing, f), join_path(raw_zone, f))
 
     print(f"Ingested {len(files)} CSV file(s) into raw zone: {files}")
     context["ti"].xcom_push(key="ingested_files", value=files)
+    emit_dataset_lineage(
+        job_name="demo_pipeline.ingest_csv_files",
+        inputs=["landing/sales_data.csv", "landing/user_events.csv"],
+        outputs=["raw/sales_data.csv", "raw/user_events.csv"],
+    )
     return files
 
 
@@ -128,8 +142,8 @@ def ingest_api_records(**context):
     import json
     import os
 
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
-    os.makedirs(raw_zone, exist_ok=True)
+    raw_zone = paths["raw"]
+    ensure_dir(raw_zone, exist_ok=True)
 
     payload = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -142,10 +156,15 @@ def ingest_api_records(**context):
             {"id": 1005, "value": 33.7, "status": "active"},
         ],
     }
-    out = os.path.join(raw_zone, f"api_demo_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+    out = join_path(raw_zone, f"api_demo_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
     with open(out, "w") as f:
         json.dump(payload, f, indent=2)
     print(f"API data ingested → {out}")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.ingest_api_data",
+        inputs=["external/demo-api"],
+        outputs=["raw/api_demo.json"],
+    )
 
 
 # Known good schemas — any deviation triggers SchemaValidationError
@@ -168,15 +187,15 @@ def validate_ingested_data(**context):
 
     import pandas as pd
 
-    raw_zone = os.getenv("RAW_ZONE", "/data/raw")
+    raw_zone = paths["raw"]
     errors = []
 
-    all_csvs = [f for f in os.listdir(raw_zone) if f.endswith(".csv") and not f.startswith(".")]
+    all_csvs = [f for f in join_path(raw_zone) if f.endswith(".csv") and not f.startswith(".")]
 
     # ── Schema check for known files ────────────────────────
     for fname, required_cols in REQUIRED_SCHEMAS.items():
-        fpath = os.path.join(raw_zone, fname)
-        if not os.path.exists(fpath):
+        fpath = join_path(raw_zone, fname)
+        if not path_exists(fpath):
             print(f"WARNING: {fname} not found in raw zone")
             continue
         df = pd.read_csv(fpath, nrows=0)
@@ -193,7 +212,7 @@ def validate_ingested_data(**context):
     for fname in all_csvs:
         if fname in known_files:
             continue
-        fpath = os.path.join(raw_zone, fname)
+        fpath = join_path(raw_zone, fname)
         df = pd.read_csv(fpath)
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
@@ -228,6 +247,11 @@ def validate_ingested_data(**context):
         )
 
     print(f"Validation PASSED for {len(all_csvs)} file(s) in raw zone")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.validate_raw_data",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv", "raw/bad_orders.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -244,22 +268,22 @@ def clean_and_transform(**context):
 
     import pandas as pd
 
-    raw_zone     = os.getenv("RAW_ZONE", "/data/raw")
-    staging      = os.getenv("STAGING_ZONE", "/data/staging")
-    processed    = os.getenv("PROCESSED_ZONE", "/data/processed")
-    curated_zone = os.getenv("CURATED_ZONE", "/data/curated")
+    raw_zone     = paths["raw"]
+    staging      = paths["staging"]
+    processed    = paths["processed"]
+    curated_zone = paths["curated"]
 
     for d in [staging, processed, curated_zone]:
-        os.makedirs(d, exist_ok=True)
+        ensure_dir(d, exist_ok=True)
 
     errors = []
     cleaned_dfs = []
 
-    for f in os.listdir(raw_zone):
+    for f in join_path(raw_zone):
         if not f.endswith(".csv") or f.startswith("."):
             continue
 
-        df = pd.read_csv(os.path.join(raw_zone, f))
+        df = pd.read_csv(join_path(raw_zone, f))
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
         # Price check
@@ -278,7 +302,7 @@ def clean_and_transform(**context):
             errors.append(f"EmptyDataError in {f}: 0 rows after cleaning")
             continue
 
-        df.to_csv(os.path.join(staging, f"cleaned_{f}"), index=False)
+        df.to_csv(join_path(staging, f"cleaned_{f}"), index=False)
         cleaned_dfs.append(df)
         print(f"Cleaned {f}: {len(df)} rows")
 
@@ -295,21 +319,27 @@ def clean_and_transform(**context):
 
     if "status" in combined.columns:
         agg = combined.groupby("status").agg("count").reset_index()
-        agg.to_csv(os.path.join(processed, "status_aggregation.csv"), index=False)
+        agg.to_csv(join_path(processed, "status_aggregation.csv"), index=False)
 
-    combined.to_csv(os.path.join(processed, "combined_data.csv"), index=False)
+    combined.to_csv(join_path(processed, "combined_data.csv"), index=False)
 
     # Enrich
-    for fname in os.listdir(processed):
+    for fname in join_path(processed):
         if not fname.endswith(".csv") or fname.startswith("."):
             continue
-        df = pd.read_csv(os.path.join(processed, fname))
+        df = pd.read_csv(join_path(processed, fname))
         df["_processed_at"]      = datetime.utcnow().isoformat()
         df["_source_file"]       = fname
         df["_pipeline_version"]  = "1.0.0"
-        df.to_csv(os.path.join(curated_zone, f"curated_{fname}"), index=False)
+        df.to_csv(join_path(curated_zone, f"curated_{fname}"), index=False)
 
     print(f"Transformation complete: {len(combined)} rows → curated zone")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.clean_and_transform",
+        inputs=["raw/sales_data.csv", "raw/user_events.csv"],
+        outputs=["processed/combined_data.csv", "processed/status_aggregation.csv",
+                 "curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -329,12 +359,12 @@ def run_quality_checks(**context):
 
     import pandas as pd
 
-    curated = os.getenv("CURATED_ZONE", "/data/curated")
+    curated = paths["curated"]
     threshold_null = float(os.getenv("NULL_RATIO_THRESHOLD", "0.10"))
     min_rows       = int(os.getenv("MIN_EXPECTED_ROWS", "3"))
     max_dup_ratio  = float(os.getenv("MAX_DUPLICATE_RATIO", "0.05"))
 
-    csvs = [f for f in os.listdir(curated) if f.endswith(".csv") and not f.startswith(".")]
+    csvs = [f for f in join_path(curated) if f.endswith(".csv") and not f.startswith(".")]
     if not csvs:
         raise FileNotFoundError(
             "QualityCheckError: No files in curated zone. "
@@ -343,7 +373,7 @@ def run_quality_checks(**context):
 
     errors = []
     for f in csvs:
-        df = pd.read_csv(os.path.join(curated, f))
+        df = pd.read_csv(join_path(curated, f))
 
         # Schema
         for col in ["_processed_at", "_source_file", "_pipeline_version"]:
@@ -383,6 +413,11 @@ def run_quality_checks(**context):
         )
 
     print(f"All quality checks PASSED for {len(csvs)} curated file(s)")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.run_quality_checks",
+        inputs=["curated/curated_combined_data.csv", "curated/curated_status_aggregation.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -403,16 +438,16 @@ def train_and_evaluate(**context):
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import train_test_split
 
-    curated   = os.getenv("CURATED_ZONE", "/data/curated")
-    feat_dir  = os.getenv("FEATURES_DIR", "/data/features")
-    model_dir = os.getenv("MODELS_DIR", "/data/models")
+    curated   = paths["curated"]
+    feat_dir  = paths["features"]
+    model_dir = paths["models"]
 
     for d in [feat_dir, model_dir]:
-        os.makedirs(d, exist_ok=True)
+        ensure_dir(d, exist_ok=True)
 
     dfs = [
-        pd.read_csv(os.path.join(curated, f))
-        for f in os.listdir(curated)
+        pd.read_csv(join_path(curated, f))
+        for f in join_path(curated)
         if f.endswith(".csv") and not f.startswith(".")
     ]
 
@@ -445,11 +480,11 @@ def train_and_evaluate(**context):
     model.fit(X_train, y_train)
     accuracy = model.score(X_test, y_test)
 
-    with open(os.path.join(model_dir, "model.pkl"), "wb") as f:
+    with open(join_path(model_dir, "model.pkl"), "wb") as f:
         pickle.dump(model, f)
 
     metrics = {"accuracy": round(accuracy, 4), "n_train": len(X_train), "n_test": len(X_test)}
-    with open(os.path.join(model_dir, "metrics.json"), "w") as f:
+    with open(join_path(model_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
     min_acc = float(os.getenv("MIN_MODEL_ACCURACY", "0.6"))
@@ -463,6 +498,11 @@ def train_and_evaluate(**context):
         )
 
     print(f"ML pipeline PASSED — accuracy: {accuracy:.4f} — model saved")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.train_and_evaluate_model",
+        inputs=["curated/curated_combined_data.csv"],
+        outputs=["models/model.pkl", "models/metrics.json"],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -473,14 +513,19 @@ def cleanup_demo(**context):
     """Remove bad_orders.csv from landing/ after demo run (restores clean state)."""
     import os
 
-    landing = os.getenv("LANDING_ZONE", "/data/landing")
-    bad_dst = os.path.join(landing, "bad_orders.csv")
+    landing = paths["landing"]
+    bad_dst = join_path(landing, "bad_orders.csv")
 
-    if os.path.exists(bad_dst):
+    if path_exists(bad_dst):
         os.remove(bad_dst)
         print("Cleanup: removed bad_orders.csv from landing/ — pipeline restored to clean state")
     else:
         print("Cleanup: nothing to remove — already clean")
+    emit_dataset_lineage(
+        job_name="demo_pipeline.cleanup_demo",
+        inputs=["landing/bad_orders.csv"],
+        outputs=[],
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -495,7 +540,7 @@ with DAG(
         '{"inject_bad_data": true} for failure demo, '
         '{"inject_bad_data": false} for clean run.'
     ),
-    schedule=None,
+    schedule="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["demo", "observability", "data-platform"],
