@@ -20,6 +20,11 @@ data:
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
   AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
   AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  # OpenLineage → Marquez
+  OPENLINEAGE_URL: "http://marquez-api.data.svc.cluster.local:5000"
+  OPENLINEAGE_NAMESPACE: "bigdata-platform"
+  MARQUEZ_URL: "http://marquez-api.data.svc.cluster.local:5000"
+  # Data zone paths (on the shared PVC)
   LANDING_ZONE: "/data/landing"
   RAW_ZONE: "/data/raw"
   STAGING_ZONE: "/data/staging"
@@ -27,6 +32,7 @@ data:
   CURATED_ZONE: "/data/curated"
   FEATURES_DIR: "/data/features"
   MODELS_DIR: "/data/models"
+  DEMO_DIR: "/data/demo"
   BACKEND_URL: "http://backend.backend.svc.cluster.local:8080"
 ---
 apiVersion: v1
@@ -39,8 +45,9 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 10Gi
 ---
+# ── Airflow Webserver ─────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,7 +70,7 @@ spec:
       initContainers:
         - name: db-init
           image: IMAGE_AIRFLOW
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -73,13 +80,17 @@ spec:
                 --username admin --password admin \
                 --firstname Admin --lastname User \
                 --role Admin --email admin@example.com || true
+              echo "Airflow DB init complete."
           envFrom:
             - configMapRef: { name: airflow-config }
             - secretRef:    { name: airflow-secrets }
+          volumeMounts:
+            - name: data-lake
+              mountPath: /data
       containers:
         - name: webserver
           image: IMAGE_AIRFLOW
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["airflow", "webserver"]
           ports:
             - containerPort: 8080
@@ -91,18 +102,19 @@ spec:
               mountPath: /data
           resources:
             requests:
-              cpu: "200m"
-              memory: "768Mi"
+              cpu: "300m"
+              memory: "1Gi"
             limits:
               cpu: "1000m"
-              memory: "1.5Gi"
+              memory: "2Gi"
           readinessProbe:
             httpGet: { path: /health, port: 8080 }
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 15
+            failureThreshold: 10
           livenessProbe:
             httpGet: { path: /health, port: 8080 }
-            initialDelaySeconds: 90
+            initialDelaySeconds: 180
             periodSeconds: 30
       volumes:
         - name: data-lake
@@ -118,10 +130,11 @@ spec:
   selector:
     app: airflow-webserver
   ports:
-    - port: 8080
+    - port: 80
       targetPort: 8080
-  type: ClusterIP
+  type: LoadBalancer
 ---
+# ── Airflow Scheduler ─────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -141,10 +154,27 @@ spec:
       labels:
         app: airflow-scheduler
     spec:
+      initContainers:
+        # Wait for webserver init to finish DB migration before scheduler starts
+        - name: wait-for-db
+          image: IMAGE_AIRFLOW
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Waiting for Airflow DB to be ready..."
+              until airflow db check; do
+                echo "DB not ready, sleeping 5s..."
+                sleep 5
+              done
+              echo "DB ready."
+          envFrom:
+            - configMapRef: { name: airflow-config }
+            - secretRef:    { name: airflow-secrets }
       containers:
         - name: scheduler
           image: IMAGE_AIRFLOW
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["airflow", "scheduler"]
           envFrom:
             - configMapRef: { name: airflow-config }
@@ -154,11 +184,11 @@ spec:
               mountPath: /data
           resources:
             requests:
-              cpu: "200m"
-              memory: "768Mi"
+              cpu: "300m"
+              memory: "1Gi"
             limits:
               cpu: "1000m"
-              memory: "1.5Gi"
+              memory: "2Gi"
       volumes:
         - name: data-lake
           persistentVolumeClaim:

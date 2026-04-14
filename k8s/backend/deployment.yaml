@@ -18,8 +18,10 @@ data:
   VERTEX_MODEL: "gemini-2.5-flash"
   EMBEDDING_MODEL: "all-MiniLM-L6-v2"
   CHROMADB_MODE: "local"
-  CHROMADB_PERSIST_DIR: "/data/chromadb"
-  AIRFLOW_BASE_URL: "http://airflow-webserver.airflow.svc.cluster.local:8080"
+  CHROMADB_PERSIST_DIR: "/chromadb"
+  MARQUEZ_URL: "http://marquez-api.data.svc.cluster.local:5000"
+  PIPELINE_NAMESPACE: "bigdata-platform"
+  AIRFLOW_BASE_URL: "http://airflow-webserver.airflow.svc.cluster.local:80"
   AIRFLOW_USERNAME: "admin"
   AIRFLOW_PASSWORD: "admin"
   PORT: "8080"
@@ -34,7 +36,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
+      storage: 5Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -59,7 +61,7 @@ spec:
       containers:
         - name: backend
           image: IMAGE_BACKEND
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:
@@ -67,21 +69,22 @@ spec:
             - secretRef:    { name: backend-secrets }
           volumeMounts:
             - name: chromadb-storage
-              mountPath: /data/chromadb
+              mountPath: /chromadb
           resources:
             requests:
-              cpu: "200m"
-              memory: "512Mi"
+              cpu: "300m"
+              memory: "1Gi"
             limits:
-              cpu: "1000m"
-              memory: "1.5Gi"
+              cpu: "2000m"
+              memory: "3Gi"
           readinessProbe:
             httpGet: { path: /health, port: 8080 }
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet: { path: /health, port: 8080 }
-            initialDelaySeconds: 60
+            initialDelaySeconds: 90
             periodSeconds: 30
       volumes:
         - name: chromadb-storage

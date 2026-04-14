@@ -12,31 +12,48 @@ data:
       index index.html;
 
       resolver kube-dns.kube-system.svc.cluster.local valid=30s;
-      set $backend http://backend.backend.svc.cluster.local:8080;
-      set $airflow http://airflow-webserver.airflow.svc.cluster.local:8080;
+      set $backend  http://backend.backend.svc.cluster.local:8080;
+      set $airflow  http://airflow-webserver.airflow.svc.cluster.local:8080;
+      set $marquez  http://marquez-web.data.svc.cluster.local:3000;
 
-      location /chat              { proxy_pass $backend; }
-      location /analyze-log       { proxy_pass $backend; }
-      location /analyze-airflow-task { proxy_pass $backend; }
-      location /analyze-k8s-pod   { proxy_pass $backend; }
-      location /k8s/              { proxy_pass $backend; }
-      location /index/            { proxy_pass $backend; }
-      location /lineage/          { proxy_pass $backend; }
-      location /ops/              { proxy_pass $backend; }
-      location /health            { proxy_pass $backend; }
+      # ── Backend API ────────────────────────────────────────
+      location /chat                    { proxy_pass $backend; }
+      location /analyze-log             { proxy_pass $backend; }
+      location /analyze-airflow-task    { proxy_pass $backend; }
+      location /analyze-k8s-pod         { proxy_pass $backend; }
+      location /k8s/                    { proxy_pass $backend; }
+      location /index/                  { proxy_pass $backend; }
+      location /lineage/                { proxy_pass $backend; }
+      location /ops/                    { proxy_pass $backend; }
+      location /health                  { proxy_pass $backend; }
 
+      # ── Airflow UI ─────────────────────────────────────────
+      # No trailing slash on proxy_pass → nginx forwards full original URI
+      # e.g. /airflow/home → Airflow receives /airflow/home (matches BASE_URL)
       location /airflow/ {
-        proxy_pass $airflow/;
+        proxy_pass $airflow;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Prefix /airflow;
+        proxy_read_timeout 300s;
       }
 
+      # ── Marquez UI ─────────────────────────────────────────
+      location /marquez/ {
+        proxy_pass $marquez/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 120s;
+      }
+
+      # ── Static assets (cached) ─────────────────────────────
       location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
       }
+
+      # ── React SPA fallback ─────────────────────────────────
       location / {
         try_files $uri $uri/ /index.html;
       }
@@ -62,7 +79,7 @@ spec:
       containers:
         - name: frontend
           image: IMAGE_FRONTEND
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           volumeMounts:
@@ -76,6 +93,10 @@ spec:
             limits:
               cpu: "250m"
               memory: "128Mi"
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
       volumes:
         - name: nginx-conf
           configMap:

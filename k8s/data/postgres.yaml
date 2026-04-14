@@ -1,4 +1,20 @@
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: data
+data:
+  init-marquez-db.sh: |
+    #!/bin/bash
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        CREATE USER marquez WITH PASSWORD 'marquez';
+        CREATE DATABASE marquez OWNER marquez;
+        GRANT ALL PRIVILEGES ON DATABASE marquez TO marquez;
+    EOSQL
+    echo "Marquez database created."
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: postgres-credentials
@@ -19,7 +35,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 10Gi
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -53,13 +69,16 @@ spec:
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d/init-marquez-db.sh
+              subPath: init-marquez-db.sh
           resources:
             requests:
-              cpu: "100m"
-              memory: "256Mi"
+              cpu: "200m"
+              memory: "512Mi"
             limits:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "1Gi"
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "airflow"]
@@ -74,6 +93,10 @@ spec:
         - name: postgres-storage
           persistentVolumeClaim:
             claimName: postgres-pvc
+        - name: init-scripts
+          configMap:
+            name: postgres-init
+            defaultMode: 0755
 ---
 apiVersion: v1
 kind: Service

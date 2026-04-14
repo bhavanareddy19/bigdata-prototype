@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -7,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .ops_sync import sync_airflow_ops, get_ops_summary
 from .airflow_logs import fetch_airflow_task_logs
-from .airflow_status_client import list_dags
+from .airflow_status_client import list_dags, list_dag_runs, trigger_dag, unpause_dag
 from .chat_agent import chat
 from .embedding_pipeline import get_index_stats, index_codebase, index_log_entry
 from .k8s_logs import (
@@ -44,6 +45,28 @@ def _workspace_root() -> str:
     return os.path.abspath(os.path.join(here, "..", ".."))
 
 
+SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "300"))  # 5 min default
+
+
+async def _background_sync():
+    """Periodically auto-sync Airflow ops + Marquez lineage into ChromaDB."""
+    # Initial delay so startup indexing finishes first
+    await asyncio.sleep(30)
+    while True:
+        try:
+            sync_airflow_ops()
+            print("[bg-sync] Airflow ops snapshot refreshed")
+        except Exception as e:
+            print(f"[bg-sync] ops sync failed (non-fatal): {e}")
+        try:
+            n = sync_lineage_to_vectordb("bigdata-platform")
+            if n:
+                print(f"[bg-sync] synced {n} lineage events from Marquez")
+        except Exception as e:
+            print(f"[bg-sync] lineage sync failed (non-fatal): {e}")
+        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Auto-index codebase on every startup so RAG is always ready
@@ -59,7 +82,27 @@ async def lifespan(app: FastAPI):
         print("[startup] ops snapshot synced from Airflow")
     except Exception as e:
         print(f"[startup] ops sync failed (non-fatal): {e}")
+    # Auto-trigger demo DAGs on first deployment (if they've never run)
+    _DEMO_DAGS = ["demo_pipeline_dag", "demo_observability_dag"]
+    for dag_id in _DEMO_DAGS:
+        try:
+            runs = list_dag_runs(dag_id, limit=1)
+            if not runs:
+                unpause_dag(dag_id)
+                trigger_dag(dag_id)
+                print(f"[startup] triggered {dag_id} (no prior runs found)")
+            else:
+                print(f"[startup] {dag_id} already has runs, skipping auto-trigger")
+        except Exception as e:
+            print(f"[startup] could not auto-trigger {dag_id} (non-fatal): {e}")
+    # Start background sync loop (Airflow ops + Marquez lineage every 5 min)
+    task = asyncio.create_task(_background_sync())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -246,8 +289,17 @@ def lineage_graph(req: LineageRequest):
 
 @app.post("/lineage/sync")
 def lineage_sync(namespace: str = "bigdata-platform"):
+    marquez_url = os.getenv("MARQUEZ_URL", "")
+    if not marquez_url:
+        raise HTTPException(status_code=503, detail="MARQUEZ_URL not configured")
+    # Quick reachability check
+    try:
+        import requests as _req
+        _req.get(f"{marquez_url.rstrip('/')}/api/v1/namespaces", timeout=5).raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Marquez unreachable at {marquez_url}: {e}")
     count = sync_lineage_to_vectordb(namespace)
-    return {"synced_events": count}
+    return {"synced_events": count, "namespace": namespace, "marquez_url": marquez_url}
 
 
 @app.post("/ops/sync-airflow")

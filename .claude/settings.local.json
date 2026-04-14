@@ -30,7 +30,11 @@
       "Bash(docker build:*)",
       "Bash(kubectl config:*)",
       "Bash(kubectl get:*)",
-      "Bash(kubectl delete:*)"
+      "Bash(kubectl delete:*)",
+      "Bash(gcloud config:*)",
+      "Bash(gcloud projects:*)",
+      "Bash(where gke-gcloud-auth-plugin:*)",
+      "Bash(kubectl -n backend logs deploy/backend --tail=50)"
     ]
   }
 }

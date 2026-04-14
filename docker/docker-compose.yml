@@ -3,9 +3,7 @@
 #
 # Services:
 #   backend      — FastAPI + RAG Engine + ChromaDB (in-process)
-#   frontend     — Streamlit chat UI
-#   ollama       — Local LLM server (LLaMA 3.1:8b)
-#   ollama-init  — One-time: pulls the LLaMA model automatically
+#   frontend     — React + nginx
 #   airflow-*    — Airflow scheduler + webserver + worker
 #   postgres     — Metadata DB for Airflow + Marquez
 #   redis        — Celery broker for Airflow
@@ -115,51 +113,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
-
-  # ── Ollama (Local LLM — 100% free) ────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-models:/root/.ollama
-    healthcheck:
-      # Use ollama CLI (always present) — no curl dependency
-      test: ["CMD-SHELL", "ollama list || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-    # GPU support (uncomment if you have NVIDIA GPU)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-    restart: unless-stopped
-
-  # ── Ollama Init — pulls LLaMA model automatically ──────
-  ollama-init:
-    image: ollama/ollama:latest
-    container_name: ollama-init
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - |
-        echo "Waiting for Ollama server..."
-        until ollama list; do sleep 3; done
-        echo "Pulling llama3.1:8b model (this may take a while on first run)..."
-        ollama pull llama3.2:1b
-        echo "Model ready."
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    depends_on:
-      ollama:
-        condition: service_healthy
-    restart: "no"
 
   # ── PostgreSQL (Airflow + Marquez metadata) ────────────
   postgres:
@@ -312,5 +265,4 @@ services:
 
 volumes:
   postgres-data:
-  ollama-models:
   chromadb-data:

@@ -69,3 +69,33 @@ def list_dag_runs(dag_id: str, limit: int = 5) -> list[dict]:
 
 def list_task_instances(dag_id: str, dag_run_id: str) -> list[dict]:
     return _get(f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances").get("task_instances", [])
+
+
+def trigger_dag(dag_id: str, conf: dict | None = None) -> dict:
+    """Trigger a DAG run via the Airflow REST API."""
+    auth, headers = _get_auth()
+    headers["Content-Type"] = "application/json"
+    resp = requests.post(
+        _api(f"/dags/{dag_id}/dagRuns"),
+        auth=auth,
+        headers=headers,
+        json={"conf": conf or {}},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def unpause_dag(dag_id: str) -> dict:
+    """Unpause a DAG so it can be triggered."""
+    auth, headers = _get_auth()
+    headers["Content-Type"] = "application/json"
+    resp = requests.patch(
+        _api(f"/dags/{dag_id}"),
+        auth=auth,
+        headers=headers,
+        json={"is_paused": False},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
