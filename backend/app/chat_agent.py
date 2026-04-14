@@ -258,14 +258,20 @@ def chat(req: ChatRequest) -> ChatResponse:
             diagnostics["rag_chunks"] = len(result.retrieved_chunks)
             diagnostics["prompt_tokens_approx"] = result.prompt_tokens_approx
             return ChatResponse(answer=result.answer, sources=sources, diagnostics=diagnostics)
-        except RuntimeError as e:
-            if "rate-limited" in str(e).lower():
+        except Exception as e:
+            err_str = str(e)
+            if "rate-limited" in err_str.lower() or "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 return ChatResponse(
                     answer="The AI model is temporarily rate-limited. Please wait a minute and try again.",
                     sources=[],
                     diagnostics={"error": "rate_limited"}
                 )
-            raise
+            # Return error as a chat message rather than crashing the endpoint
+            return ChatResponse(
+                answer=f"Sorry, I encountered an error while generating a response: {err_str}",
+                sources=[],
+                diagnostics={"error": err_str},
+            )
 
     repo_snips = search_repo_snippets(root_dir=repo_root, query=req.question) if req.include_repo_context else []
     sources.extend({"type": "repo", "path": s.path, "snippet": s.snippet} for s in repo_snips)

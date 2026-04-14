@@ -92,12 +92,63 @@ function DatasetBadge({ name }) {
   )
 }
 
+// ── Static lineage fallback (populated from emit_dataset_lineage calls in DAGs) ─
+// When Marquez returns empty inputs/outputs, we fall back to this known mapping.
+const STATIC_TASK_LINEAGE = {
+  // data_ingestion DAG
+  'data_ingestion.ingest_csv_files':         { inputs: ['landing/sales_data.csv', 'landing/user_events.csv'], outputs: ['raw/sales_data.csv', 'raw/user_events.csv'] },
+  'data_ingestion.ingest_api_data':          { inputs: ['external/rest-api'], outputs: ['raw/api_data.json'] },
+  'data_ingestion.validate_raw_data':        { inputs: ['raw/sales_data.csv', 'raw/user_events.csv', 'raw/api_data.json'], outputs: ['raw/validated'] },
+  // data_transformation DAG
+  'data_transformation.clean_data':          { inputs: ['raw/sales_data.csv', 'raw/user_events.csv'], outputs: ['staging/cleaned_sales_data.csv', 'staging/cleaned_user_events.csv'] },
+  'data_transformation.transform_aggregate': { inputs: ['staging/cleaned_sales_data.csv', 'staging/cleaned_user_events.csv'], outputs: ['processed/combined_data.csv', 'processed/status_aggregation.csv'] },
+  'data_transformation.enrich_with_metadata':{ inputs: ['processed/combined_data.csv', 'processed/status_aggregation.csv'], outputs: ['curated/curated_combined_data.csv', 'curated/curated_status_aggregation.csv'] },
+  // data_quality_checks DAG
+  'data_quality_checks.check_schema_conformance': { inputs: ['curated/curated_combined_data.csv', 'curated/curated_status_aggregation.csv'], outputs: [] },
+  'data_quality_checks.check_null_ratios':   { inputs: ['curated/curated_combined_data.csv'], outputs: [] },
+  'data_quality_checks.check_row_counts':    { inputs: ['curated/curated_combined_data.csv'], outputs: [] },
+  'data_quality_checks.check_duplicates':    { inputs: ['curated/curated_combined_data.csv'], outputs: [] },
+  // ml_pipeline DAG
+  'ml_pipeline.build_features':             { inputs: ['curated/curated_combined_data.csv', 'curated/curated_status_aggregation.csv'], outputs: ['features/features.csv'] },
+  'ml_pipeline.train_model':                { inputs: ['features/features.csv'], outputs: ['models/model.pkl', 'models/metrics.json'] },
+  'ml_pipeline.evaluate_model':             { inputs: ['models/metrics.json'], outputs: [] },
+  // demo_pipeline DAG
+  'demo_pipeline.setup_demo_data':           { inputs: ['demo/bad_orders.csv'], outputs: ['landing/bad_orders.csv'] },
+  'demo_pipeline.ingest_csv_files':          { inputs: ['landing/sales_data.csv', 'landing/user_events.csv'], outputs: ['raw/sales_data.csv', 'raw/user_events.csv'] },
+  'demo_pipeline.ingest_api_data':           { inputs: ['external/demo-api'], outputs: ['raw/api_demo.json'] },
+  'demo_pipeline.validate_raw_data':         { inputs: ['raw/sales_data.csv', 'raw/user_events.csv', 'raw/bad_orders.csv'], outputs: [] },
+  'demo_pipeline.clean_and_transform':       { inputs: ['raw/sales_data.csv', 'raw/user_events.csv'], outputs: ['processed/combined_data.csv', 'processed/status_aggregation.csv', 'curated/curated_combined_data.csv'] },
+  'demo_pipeline.run_quality_checks':        { inputs: ['curated/curated_combined_data.csv', 'curated/curated_status_aggregation.csv'], outputs: [] },
+  'demo_pipeline.train_and_evaluate_model':  { inputs: ['curated/curated_combined_data.csv'], outputs: ['models/model.pkl', 'models/metrics.json'] },
+  'demo_pipeline.cleanup_demo':              { inputs: ['landing/bad_orders.csv'], outputs: [] },
+  // demo_observability DAG
+  'demo_observability.task_ok':         { inputs: ['landing/sales_data.csv', 'landing/user_events.csv'], outputs: [] },
+  'demo_observability.task_fail_data':  { inputs: ['curated/curated_combined_data.csv'], outputs: [] },
+  'demo_observability.task_fail_code':  { inputs: ['processed/combined_data.csv'], outputs: [] },
+}
+
+function resolveIO(job) {
+  const marqInputs  = (job.inputs  || []).filter(x => x && x.name && x.name.trim())
+  const marqOutputs = (job.outputs || []).filter(x => x && x.name && x.name.trim())
+  if (marqInputs.length > 0 || marqOutputs.length > 0) {
+    return { inputs: marqInputs, outputs: marqOutputs }
+  }
+  // Fall back to static mapping
+  const fallback = STATIC_TASK_LINEAGE[job.name]
+  if (fallback) {
+    return {
+      inputs:  fallback.inputs.map(n => ({ name: n })),
+      outputs: fallback.outputs.map(n => ({ name: n })),
+    }
+  }
+  return { inputs: [], outputs: [] }
+}
+
 // ── JobCard ──────────────────────────────────────────────────
 
 function JobCard({ job }) {
   const [open, setOpen] = useState(false)
-  const inputs = job.inputs || []
-  const outputs = job.outputs || []
+  const { inputs, outputs } = resolveIO(job)
   const taskName = job.name.includes('.') ? job.name.split('.').slice(1).join('.') : job.name
 
   return (
@@ -312,6 +363,18 @@ export default function LineagePage() {
     grouped[g].push(j)
   }
 
+  // If Marquez datasets list is empty, derive from static lineage fallback so ZoneFlow has data
+  const effectiveDatasets = datasets.length > 0 ? datasets : (() => {
+    const seen = new Set()
+    const derived = []
+    for (const { inputs, outputs } of Object.values(STATIC_TASK_LINEAGE)) {
+      for (const n of [...inputs, ...outputs]) {
+        if (!seen.has(n)) { seen.add(n); derived.push({ name: n }) }
+      }
+    }
+    return derived
+  })()
+
   const nsName = typeof (namespaces[0]) === 'string' ? namespaces[0] : namespaces[0]?.name
 
   return (
@@ -359,7 +422,7 @@ export default function LineagePage() {
       {selected && !detailLoading && !detailError && (
         <>
           {/* Zone Flow Overview */}
-          <ZoneFlow datasets={datasets} />
+          <ZoneFlow datasets={effectiveDatasets} />
 
           {/* Stats Row */}
           <div className="grid grid-cols-3 gap-3">
@@ -368,7 +431,7 @@ export default function LineagePage() {
               <p className="text-xs text-gray-400 mt-0.5">Tasks Tracked</p>
             </div>
             <div className="rounded border border-gray-700 bg-gray-800 p-3 text-center">
-              <p className="text-2xl font-bold text-white">{datasets.length}</p>
+              <p className="text-2xl font-bold text-white">{effectiveDatasets.length}</p>
               <p className="text-xs text-gray-400 mt-0.5">Datasets</p>
             </div>
             <div className="rounded border border-gray-700 bg-gray-800 p-3 text-center">

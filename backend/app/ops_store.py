@@ -7,7 +7,9 @@ from typing import Any
 from .settings import get_gcs_data_bucket
 
 OPS_BLOB = "ops/latest_status.json"
-_LOCAL_SNAPSHOT = "/tmp/ops_latest_status.json"
+# Use the ChromaDB PVC directory so data survives pod restarts
+_CHROMADB_DIR = os.getenv("CHROMADB_PERSIST_DIR", "/tmp")
+_LOCAL_SNAPSHOT = os.path.join(_CHROMADB_DIR, "ops_latest_status.json")
 _EMPTY: dict[str, Any] = {"generated_at": None, "dags": [], "recent_failures": []}
 
 

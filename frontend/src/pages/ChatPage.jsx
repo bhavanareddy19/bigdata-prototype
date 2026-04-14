@@ -6,7 +6,7 @@ import ModeSelector from '../components/ModeSelector'
 export default function ChatPage() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [mode, setMode] = useState('auto')
+  const [mode, setMode] = useState('llm')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const bottomRef = useRef(null)

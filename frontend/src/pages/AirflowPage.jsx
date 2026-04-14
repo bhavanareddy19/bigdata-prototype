@@ -9,7 +9,7 @@ export default function AirflowPage() {
   const [tryNumber, setTryNumber] = useState('1')
   // Leave baseUrl empty — backend uses its own AIRFLOW_BASE_URL env var
   const [baseUrl, setBaseUrl]   = useState('')
-  const [mode, setMode]         = useState('auto')
+  const [mode, setMode]         = useState('llm')
   const [loading, setLoading]   = useState(false)
   const [result, setResult]     = useState(null)
   const [error, setError]       = useState(null)

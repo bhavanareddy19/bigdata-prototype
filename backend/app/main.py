@@ -49,17 +49,30 @@ SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "300"))  # 5 min 
 
 
 async def _background_sync():
-    """Periodically auto-sync Airflow ops + Marquez lineage into ChromaDB."""
-    # Initial delay so startup indexing finishes first
-    await asyncio.sleep(30)
+    """Periodically auto-sync Airflow ops + Marquez lineage into ChromaDB.
+    Also auto-triggers demo DAGs on first run if they have no runs yet.
+    Runs in background so it never blocks startup."""
+    # Short initial delay — let the server fully start before making external calls
+    await asyncio.sleep(5)
+    # One-time: trigger demo DAGs if they've never run
+    _DEMO_DAGS = ["demo_pipeline_dag", "demo_observability_dag"]
+    for dag_id in _DEMO_DAGS:
+        try:
+            runs = await asyncio.to_thread(list_dag_runs, dag_id, 1)
+            if not runs:
+                await asyncio.to_thread(unpause_dag, dag_id)
+                await asyncio.to_thread(trigger_dag, dag_id)
+                print(f"[bg-sync] auto-triggered {dag_id}")
+        except Exception as e:
+            print(f"[bg-sync] could not auto-trigger {dag_id} (non-fatal): {e}")
     while True:
         try:
-            sync_airflow_ops()
+            await asyncio.to_thread(sync_airflow_ops)
             print("[bg-sync] Airflow ops snapshot refreshed")
         except Exception as e:
             print(f"[bg-sync] ops sync failed (non-fatal): {e}")
         try:
-            n = sync_lineage_to_vectordb("bigdata-platform")
+            n = await asyncio.to_thread(sync_lineage_to_vectordb, "bigdata-platform")
             if n:
                 print(f"[bg-sync] synced {n} lineage events from Marquez")
         except Exception as e:
@@ -72,30 +85,11 @@ async def lifespan(app: FastAPI):
     # Auto-index codebase on every startup so RAG is always ready
     try:
         root = _workspace_root()
-        count = index_codebase(root, reset=False)
+        count = await asyncio.to_thread(index_codebase, root, False)
         print(f"[startup] auto-indexed {count} chunks from {root}")
     except Exception as e:
         print(f"[startup] indexing failed (non-fatal): {e}")
-    # Auto-sync Airflow ops snapshot on startup
-    try:
-        sync_airflow_ops()
-        print("[startup] ops snapshot synced from Airflow")
-    except Exception as e:
-        print(f"[startup] ops sync failed (non-fatal): {e}")
-    # Auto-trigger demo DAGs on first deployment (if they've never run)
-    _DEMO_DAGS = ["demo_pipeline_dag", "demo_observability_dag"]
-    for dag_id in _DEMO_DAGS:
-        try:
-            runs = list_dag_runs(dag_id, limit=1)
-            if not runs:
-                unpause_dag(dag_id)
-                trigger_dag(dag_id)
-                print(f"[startup] triggered {dag_id} (no prior runs found)")
-            else:
-                print(f"[startup] {dag_id} already has runs, skipping auto-trigger")
-        except Exception as e:
-            print(f"[startup] could not auto-trigger {dag_id} (non-fatal): {e}")
-    # Start background sync loop (Airflow ops + Marquez lineage every 5 min)
+    # Start background sync loop — all Airflow/Marquez calls happen there
     task = asyncio.create_task(_background_sync())
     yield
     task.cancel()

@@ -34,7 +34,9 @@
       "Bash(gcloud config:*)",
       "Bash(gcloud projects:*)",
       "Bash(where gke-gcloud-auth-plugin:*)",
-      "Bash(kubectl -n backend logs deploy/backend --tail=50)"
+      "Bash(kubectl -n backend logs deploy/backend --tail=50)",
+      "Bash(kubectl -n backend get pods)",
+      "Bash(kubectl -n backend logs deployment/backend --tail=60)"
     ]
   }
 }
