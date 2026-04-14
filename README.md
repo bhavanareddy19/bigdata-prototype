@@ -8,7 +8,7 @@ A complete data platform with **Airflow DAGs**, **OpenLineage/Marquez lineage tr
 
 ```
 ┌─────────────┐    ┌─────────────────────────────────────────────────────┐
-│  Streamlit   │───▶│  FastAPI Backend                                    │
+│  Streamlit   │───▶│  FastAPI Backend                                  |
 │  Chat UI     │    │  /chat  /analyze-log  /index/*  /lineage/*         │
 └─────────────┘    └────┬──────────┬──────────┬──────────┬───────────────┘
                         │          │          │          │
