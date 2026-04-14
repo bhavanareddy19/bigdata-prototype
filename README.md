@@ -1,386 +1,359 @@
-# BigData Platform — Observability Agent
+# BigData Platform — AI Observability Agent
 
-A complete data platform with **Airflow DAGs**, **OpenLineage/Marquez lineage tracking**, **Kubernetes deployment**, and a **RAG-powered chatbot** (ChromaDB + Ollama LLaMA 3.1) that analyzes logs, explains failures, and answers questions about your codebase, DAGs, and data lineage.
+A production-grade big data platform deployed on **Google Kubernetes Engine (GKE)** with an AI-powered observability chatbot. Engineers can diagnose pipeline failures, analyze Kubernetes pod issues, trace data lineage, and get instant answers about the platform — all through a RAG-powered chat interface backed by Google Gemini.
 
-**100% free & open-source** — no OpenAI, no paid APIs.
-
-## Architecture
+## Live Architecture
 
 ```
-┌─────────────┐    ┌─────────────────────────────────────────────────────┐
-│  Streamlit   │───▶│  FastAPI Backend                                  |
-│  Chat UI     │    │  /chat  /analyze-log  /index/*  /lineage/*         │
-└─────────────┘    └────┬──────────┬──────────┬──────────┬───────────────┘
-                        │          │          │          │
-                   ┌────▼───┐ ┌───▼────┐ ┌───▼────┐ ┌──▼──────────┐
-                   │  RAG   │ │  Log   │ │Lineage │ │  Embedding  │
-                   │ Engine │ │Analyzer│ │ Client │ │  Pipeline   │
-                   └───┬────┘ └────────┘ └───┬────┘ └──┬──────────┘
-                       │                     │         │
-                  ┌────▼────┐          ┌─────▼───┐ ┌───▼──────────┐
-                  │ Ollama  │          │ Marquez │ │   ChromaDB   │
-                  │LLaMA3.1│          │(lineage)│ │ (vector DB)  │
-                  └─────────┘          └────┬────┘ └──────────────┘
-                                            │
-                                    ┌───────▼────────┐
-                                    │ Apache Airflow  │
-                                    │ 5 DAGs + OL     │
-                                    └────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                  React Frontend (Vite + Tailwind)            │
+│  Chat │ Log Analysis │ Airflow │ Kubernetes │ Lineage        │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ nginx reverse proxy
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    FastAPI Backend                           │
+│  /chat  /analyze-log  /analyze-airflow-task                  │
+│  /analyze-k8s-pod  /lineage/*  /ops/*  /index/*             │
+└──────┬──────────┬──────────┬──────────┬──────────┬──────────┘
+       │          │          │          │          │
+  ┌────▼───┐ ┌───▼────┐ ┌───▼────┐ ┌───▼────┐ ┌───▼──────┐
+  │  RAG   │ │  Log   │ │  K8s  │ │Lineage │ │  Ops     │
+  │ Engine │ │Analyzer│ │ Logs  │ │ Client │ │  Sync    │
+  └───┬────┘ └────────┘ └───────┘ └───┬────┘ └──┬───────┘
+      │                               │          │
+ ┌────▼────┐                   ┌──────▼──┐ ┌────▼────────┐
+ │ Gemini  │                   │ Marquez │ │  Apache     │
+ │  Flash  │                   │Lineage  │ │  Airflow    │
+ └─────────┘                   └─────────┘ └─────────────┘
+      │
+ ┌────▼────┐
+ │ChromaDB │  ← code + logs + DAG metadata + lineage
+ │(PVC)    │
+ └─────────┘
 ```
 
 ## What's Built
 
-| Component | Technology | Purpose |
+| Component | Technology | Details |
 |---|---|---|
-| LLM | Ollama + LLaMA 3.1:8b | Free local inference for chat & log analysis |
-| Embeddings | sentence-transformers (all-MiniLM-L6-v2) | Embed code, logs, DAG metadata, lineage into vectors |
-| Vector DB | ChromaDB | Store & search embeddings for RAG |
-| RAG Engine | Custom (retrieve → assemble → prompt → LLM) | Answer questions using indexed project context |
-| Data Pipelines | Apache Airflow (5 DAGs) | Ingestion, transformation, quality, ML, deployment |
-| Lineage | OpenLineage + Marquez | Track data lineage across all DAG tasks |
-| Backend | FastAPI | REST API for analysis, chat, indexing, lineage |
-| Frontend | Streamlit | Chat UI with indexing & lineage controls |
-| Containers | Docker + docker-compose | All services containerized |
-| Orchestration | Kubernetes manifests | Production deployment with namespaces, PVCs, Ingress |
+| **Frontend** | React + Vite + Tailwind CSS | Multi-page SPA: Chat, Log Analysis, Airflow, K8s, Lineage |
+| **Backend** | FastAPI (Python) | REST API, background sync, RAG engine |
+| **LLM** | Google Gemini 2.5 Flash | Via Google AI Studio API key |
+| **Embeddings** | all-MiniLM-L6-v2 | Local sentence-transformers, no API needed |
+| **Vector DB** | ChromaDB (local, PVC-backed) | 4 collections: code, logs, DAG metadata, lineage |
+| **Pipelines** | Apache Airflow (6 DAGs) | Full data lake pipeline with OpenLineage emission |
+| **Lineage** | OpenLineage + Marquez | Data flow tracking from landing → models |
+| **Infra** | GKE (Google Kubernetes Engine) | 3 namespaces, LoadBalancer services, PVCs |
 
 ## Airflow DAGs
 
 | DAG | Schedule | What it does |
 |---|---|---|
-| `data_ingestion` | `@hourly` | Ingests CSV files + API data into raw data lake |
-| `data_transformation` | `@daily` | Cleans, aggregates, enriches data → curated zone |
-| `data_quality_checks` | `@daily` | Schema validation, null checks, row counts, duplicates |
+| `data_ingestion` | `@daily` | Ingests CSV files + REST API data into raw zone |
+| `data_transformation` | `@daily` | Cleans, aggregates, enriches data through staging → curated |
+| `data_quality_checks` | `@daily` | Schema validation, null ratios, row counts, duplicate detection |
 | `ml_pipeline` | `@weekly` | Feature engineering + RandomForest training + evaluation |
-| `deploy_pipeline` | Manual | Tests → Docker build → K8s deploy → observability notify |
+| `demo_pipeline` | Manual | End-to-end demo with clean/bad data toggle (`inject_bad_data: true/false`) |
+| `demo_observability` | Manual | Intentionally failing DAG for chatbot diagnosis demo |
+
+### Data Lake Zones
+
+```
+External APIs / CSVs
+        ↓
+   landing/          ← raw uploads
+        ↓
+    raw/             ← ingested files
+        ↓
+   staging/          ← cleaned data
+        ↓
+  processed/         ← aggregated
+        ↓
+   curated/          ← enriched + quality-checked
+        ↓
+  features/          ← ML feature matrices
+        ↓
+   models/           ← trained model artifacts
+```
+
+## Frontend Pages
+
+| Page | Path | What it does |
+|---|---|---|
+| **Chat** | `/` | RAG-powered chatbot — ask anything about pipelines, pods, errors |
+| **Log Analysis** | `/logs` | Paste any log text → AI diagnosis (category, root cause, next actions) |
+| **Airflow** | `/airflow` | Auto-fills from recent failures, analyzes task logs |
+| **Kubernetes** | `/k8s` | Browse pods/namespaces, view events, diagnose issues |
+| **Lineage** | `/lineage` | Data flow overview, pipeline task I/O, zone-by-zone view |
 
 ## API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Health check |
-| POST | `/chat` | RAG-powered chat (uses ChromaDB + Ollama) |
-| POST | `/analyze-log` | Analyze pasted logs (heuristic + LLM) |
+| POST | `/chat` | RAG chat (Gemini + ChromaDB) |
+| POST | `/analyze-log` | Analyze raw log text |
 | POST | `/analyze-k8s-pod` | Fetch + analyze Kubernetes pod logs |
 | POST | `/analyze-airflow-task` | Fetch + analyze Airflow task logs |
-| POST | `/index/codebase` | Index project code into ChromaDB |
-| POST | `/index/log` | Index a log entry into ChromaDB |
-| GET | `/index/stats` | VectorDB collection statistics |
+| GET | `/ops/summary` | Live pipeline status (from Airflow) |
+| GET | `/ops/latest-failures` | Recent failed tasks with AI summaries |
+| GET | `/ops/list-dags` | List all Airflow DAGs |
+| GET | `/k8s/namespaces` | List K8s namespaces |
+| GET | `/k8s/pods/{namespace}` | List pods in a namespace |
+| GET | `/k8s/diagnose/{namespace}` | AI diagnosis of all pods in namespace |
+| GET | `/k8s/events/{namespace}` | Recent K8s events |
 | GET | `/lineage/namespaces` | List Marquez namespaces |
-| GET | `/lineage/jobs/{ns}` | List lineage jobs |
-| GET | `/lineage/datasets/{ns}` | List lineage datasets |
-| POST | `/lineage/graph` | Get lineage graph for a job/dataset |
-| POST | `/lineage/sync` | Sync Marquez lineage into ChromaDB |
+| GET | `/lineage/jobs/{ns}` | List pipeline jobs with lineage |
+| GET | `/lineage/datasets/{ns}` | List datasets |
+| POST | `/lineage/sync` | Sync Marquez lineage → ChromaDB |
+| POST | `/index/codebase` | Re-index codebase into ChromaDB |
+| GET | `/index/stats` | ChromaDB collection stats |
 
----
-
-## Quick Start (Local Development)
-
-### Prerequisites
-
-- Python 3.11+
-- [Ollama](https://ollama.com) installed
-- Docker & Docker Compose (for full stack)
-
-### Step 1: Install Ollama and pull the model
-
-```bash
-# Install from https://ollama.com, then:
-ollama pull llama3.1:8b
-```
-
-This downloads the free LLaMA 3.1 8B model (~4.7 GB). It runs entirely on your machine.
-
-### Step 2: Clone and set up
-
-```bat
-git clone <your-repo-url>
-cd bigdata-prototype
-
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-
-copy .env.example .env
-```
-
-### Step 3: Index the codebase into ChromaDB
-
-```bat
-python scripts\index_codebase.py
-```
-
-This walks all project files, chunks them, embeds with `all-MiniLM-L6-v2`, and stores in ChromaDB. Takes ~30 seconds on first run.
-
-### Step 4: Start the backend
-
-```bat
-python -m uvicorn backend.app.main:app --reload --port 8000
-```
-
-### Step 5: Start the frontend (new terminal)
-
-```bat
-streamlit run frontend\streamlit_app.py
-```
-
-### Step 6: Chat!
-
-Open http://localhost:8501 and ask questions like:
-- "What DAGs are in this project?"
-- "Explain the data_transformation DAG"
-- "What does the RAG engine do?"
-- Paste failing logs and ask "Why did this fail?"
-
----
-
-## Full Stack with Docker Compose
-
-This runs ALL services: Backend, Frontend, Ollama, Airflow (webserver + scheduler + worker), PostgreSQL, Redis, Marquez (API + Web UI).
-
-### Step 1: Start everything
-
-```bash
-cd docker
-docker-compose up -d
-```
-
-### Step 2: Pull the LLM model inside the Ollama container
-
-```bash
-docker exec -it ollama ollama pull llama3.1:8b
-```
-
-### Step 3: Initialize Airflow
-
-```bash
-# This runs automatically via airflow-init, but if you need to re-run:
-docker exec -it airflow-webserver airflow db init
-docker exec -it airflow-webserver airflow users create \
-  --username admin --password admin \
-  --firstname Admin --lastname User --role Admin --email admin@example.com
-```
-
-### Step 4: Index the codebase
-
-```bash
-# From inside the backend container:
-docker exec -it backend python scripts/index_codebase.py
-```
-
-### Step 5: Access the services
-
-| Service | URL | Credentials |
-|---|---|---|
-| Streamlit Chat UI | http://localhost:8501 | — |
-| FastAPI Backend | http://localhost:8000 | — |
-| FastAPI Docs | http://localhost:8000/docs | — |
-| Airflow UI | http://localhost:8080 | admin / admin |
-| Marquez Lineage UI | http://localhost:3000 | — |
-| Marquez API | http://localhost:5000 | — |
-| Ollama | http://localhost:11434 | — |
-
-### Step 6: Enable and trigger DAGs
-
-1. Open Airflow UI at http://localhost:8080
-2. Unpause the DAGs you want to run
-3. Trigger `data_ingestion` first, then `data_transformation`, then `data_quality_checks`
-4. Lineage events are automatically sent to Marquez via OpenLineage
-5. View lineage graph at http://localhost:3000
-
-### Step 7: Sync lineage to VectorDB
-
-```bash
-# From the Streamlit sidebar, click "Sync Lineage to VectorDB"
-# Or via API:
-curl -X POST http://localhost:8000/lineage/sync
-```
-
-Now the chatbot can answer lineage questions like "What datasets does data_ingestion produce?"
-
----
-
-## Kubernetes Deployment
+## GKE Deployment
 
 ### Prerequisites
 
-- A Kubernetes cluster (minikube, kind, EKS, GKE, AKS)
-- `kubectl` configured
-- Docker images built and pushed to a registry
+- Google Cloud account with a project
+- `gcloud` CLI installed and authenticated
+- `kubectl` + `gke-gcloud-auth-plugin` installed
+- Docker Desktop
+- A Google AI Studio API key ([get one free](https://aistudio.google.com))
 
-### Step 1: Build and push images
+### One-command deploy
 
 ```bash
-# From project root:
-docker build -t your-registry/bigdata-backend:latest -f docker/Dockerfile.backend .
-docker build -t your-registry/bigdata-airflow:latest -f docker/Dockerfile.airflow .
-docker build -t your-registry/bigdata-frontend:latest -f docker/Dockerfile.frontend .
+# Set your API key in .env first:
+echo "GOOGLE_API_KEY=your-key-here" > .env
 
-docker push your-registry/bigdata-backend:latest
-docker push your-registry/bigdata-airflow:latest
-docker push your-registry/bigdata-frontend:latest
+# Deploy everything (cluster + images + all services):
+./scripts/deploy-gke.sh
 ```
 
-### Step 2: Create namespaces
+The script:
+1. Enables GCP APIs
+2. Creates Artifact Registry repo
+3. Creates GKE cluster (`e2-standard-4`, 2 nodes, spot instances)
+4. Builds and pushes 3 Docker images (backend, frontend, airflow)
+5. Deploys Postgres, Marquez, Airflow, Backend, Frontend
+6. Waits for LoadBalancer IPs and prints access URLs
 
-```bash
+### Manual deploy (CMD on Windows)
+
+```cmd
+set PROJECT_ID=your-gcp-project-id
+set REGION=us-central1
+set REGISTRY=us-central1-docker.pkg.dev/%PROJECT_ID%/bigdata
+set TAG=v1
+
+:: Auth
+gcloud container clusters get-credentials bigdata-lean --zone us-central1-a
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+:: Build & push
+docker build -t %REGISTRY%/frontend:%TAG% -f docker/Dockerfile.frontend .
+docker build -t %REGISTRY%/backend:%TAG% -f docker/Dockerfile.backend .
+docker build -t %REGISTRY%/airflow:%TAG% -f docker/Dockerfile.airflow .
+docker push %REGISTRY%/frontend:%TAG%
+docker push %REGISTRY%/backend:%TAG%
+docker push %REGISTRY%/airflow:%TAG%
+
+:: Inject API key (never commit this)
+kubectl -n backend create secret generic backend-secrets ^
+  --from-literal=GOOGLE_API_KEY="YOUR_KEY" ^
+  --dry-run=client -o yaml | kubectl apply -f -
+
+:: Apply manifests
 kubectl apply -f k8s/namespaces.yaml
+kubectl apply -f k8s/backend/rbac.yaml
+kubectl apply -f k8s/data/postgres.yaml
+kubectl apply -f k8s/data/marquez.yaml
+
+:: Substitute image placeholders and apply
+python -c "import sys; open('_tmp.yaml','w').write(open('k8s/backend/deployment.yaml').read().replace('IMAGE_BACKEND','%REGISTRY%/backend:%TAG%'))" && kubectl apply -f _tmp.yaml
+python -c "import sys; open('_tmp.yaml','w').write(open('k8s/backend/frontend.yaml').read().replace('IMAGE_FRONTEND','%REGISTRY%/frontend:%TAG%'))" && kubectl apply -f _tmp.yaml
+python -c "import sys; open('_tmp.yaml','w').write(open('k8s/airflow/deployment.yaml').read().replace('IMAGE_AIRFLOW','%REGISTRY%/airflow:%TAG%'))" && kubectl apply -f _tmp.yaml
 ```
 
-### Step 3: Deploy all services
+### K8s Namespaces
 
-```bash
-kubectl apply -f k8s/ --recursive
-```
-
-This creates:
-- **backend** namespace: FastAPI (2 replicas), Ollama, Frontend, ChromaDB PVC
-- **airflow** namespace: Webserver, Scheduler, Worker (2 replicas), Redis, Data Lake PVC
-- **data** namespace: PostgreSQL, Marquez API, Marquez Web
-- **Ingress** rules for external access
-
-### Step 4: Pull Ollama model in the cluster
-
-```bash
-kubectl exec -it deployment/ollama -n backend -- ollama pull llama3.1:8b
-```
-
-### Step 5: Access via Ingress
-
-Add to your `/etc/hosts` (or DNS):
-```
-<INGRESS_IP>  bigdata.local api.bigdata.local airflow.bigdata.local lineage.bigdata.local
-```
-
-| Host | Service |
+| Namespace | Services |
 |---|---|
-| bigdata.local | Streamlit UI |
-| api.bigdata.local | FastAPI Backend |
-| airflow.bigdata.local | Airflow UI |
-| lineage.bigdata.local | Marquez Lineage UI |
+| `backend` | FastAPI backend, React frontend (nginx) |
+| `airflow` | Airflow webserver + scheduler |
+| `data` | PostgreSQL, Marquez API, Marquez Web UI |
+| `demo-faults` | Intentionally broken pods for observability demo |
 
----
+### Service URLs (after deploy)
+
+```bash
+kubectl -n backend get svc frontend        # Main app (port 80)
+kubectl -n airflow get svc airflow-webserver  # Airflow UI (port 80)
+```
+
+## Demo Scenarios
+
+### 1. Pipeline failure diagnosis
+
+1. Open Airflow UI → trigger `demo_pipeline` with `{"inject_bad_data": true}`
+2. Wait for tasks to fail (red)
+3. Open the main app → **Airflow Task Logs** page
+4. Click any red failure button in "Recent Failures" to auto-fill the form
+5. Click **Analyze** → AI diagnosis appears
+6. Click **Ask in Chat** → chatbot explains and suggests fixes
+
+### 2. Kubernetes observability demo
+
+The `demo-faults` namespace has 4 permanently broken pods:
+
+```bash
+kubectl get pods -n demo-faults
+```
+
+| Pod | Status | Scenario |
+|---|---|---|
+| `crash-loop-app` | CrashLoopBackOff | DB connection refused on startup |
+| `image-pull-error` | ImagePullBackOff | Non-existent container image |
+| `oom-killed-app` | OOMKilled | Memory limit exceeded (exit 137) |
+| `resource-starved` | Pending | Impossible resource request (999 CPUs) |
+
+Go to the **Kubernetes** page → select `demo-faults` namespace → view pod details and events.
+
+### 3. Data lineage exploration
+
+1. Run a DAG in Airflow (any of the 6)
+2. Go to the **Lineage** page
+3. See the data flow overview: External → Landing → Raw → Staging → Processed → Curated → Features → Models
+4. Click any pipeline section to expand and see per-task input/output datasets
+5. Click **Sync to VectorDB** to make lineage searchable in chat
 
 ## Project Structure
 
 ```
 bigdata-prototype/
 ├── backend/app/
-│   ├── main.py                 # FastAPI app with all endpoints
-│   ├── models.py               # Pydantic request/response models
-│   ├── settings.py             # Environment configuration
-│   ├── chat_agent.py           # Chat endpoint → RAG engine
-│   ├── rag_engine.py           # RAG: retrieve → assemble → LLM
-│   ├── vectordb_client.py      # ChromaDB client (local/server)
-│   ├── embedding_pipeline.py   # Embed code, logs, DAGs, lineage
-│   ├── lineage_client.py       # Marquez/OpenLineage API client
-│   ├── llm_client.py           # Ollama LLM client (chat + JSON)
-│   ├── llm_ollama.py           # Ollama HTTP API wrapper
-│   ├── log_analyzer.py         # Heuristic + LLM log analysis
-│   ├── repo_context.py         # Fallback file-walk search
-│   ├── k8s_logs.py             # Kubernetes pod log fetcher
-│   └── airflow_logs.py         # Airflow REST API log fetcher
+│   ├── main.py                  # FastAPI app + lifespan + background sync
+│   ├── models.py                # Pydantic request/response models
+│   ├── settings.py              # Environment configuration
+│   ├── chat_agent.py            # Chat orchestration (ops + K8s + Airflow + RAG)
+│   ├── rag_engine.py            # RAG: retrieve → assemble → Gemini
+│   ├── llm_client.py            # LLM dispatcher (Vertex / Ollama)
+│   ├── llm_vertex.py            # Google Gemini client (google-genai SDK)
+│   ├── embedding_pipeline.py    # Embed code, logs, DAGs, lineage → ChromaDB
+│   ├── vectordb_client.py       # ChromaDB client
+│   ├── lineage_client.py        # Marquez REST API client
+│   ├── log_analyzer.py          # Heuristic + LLM log analysis
+│   ├── airflow_logs.py          # Airflow REST API log fetcher
+│   ├── airflow_status_client.py # Airflow DAG/run/task API client
+│   ├── k8s_logs.py              # Kubernetes pod log + diagnosis
+│   ├── ops_sync.py              # Background Airflow status sync
+│   ├── ops_store.py             # Ops snapshot persistence (ChromaDB PVC)
+│   └── repo_context.py          # Fallback repo file search
 ├── dags/
-│   ├── data_ingestion_dag.py   # Ingest CSV + API data
-│   ├── data_transformation_dag.py  # Clean, aggregate, enrich
-│   ├── data_quality_dag.py     # Schema, null, row, duplicate checks
-│   ├── ml_pipeline_dag.py      # Features + model training
-│   └── deploy_pipeline_dag.py  # Test → build → deploy → notify
+│   ├── data_ingestion_dag.py    # Ingest CSV + API → raw zone
+│   ├── data_transformation_dag.py  # Clean → staging → processed → curated
+│   ├── data_quality_dag.py      # Schema, null, row count, duplicate checks
+│   ├── ml_pipeline_dag.py       # Features + RandomForest training
+│   ├── demo_pipeline_dag.py     # Full end-to-end demo (clean/bad data)
+│   ├── demo_observability_dag.py # Intentionally failing tasks for demo
+│   └── utils/
+│       ├── lineage.py           # emit_dataset_lineage() → Marquez
+│       ├── storage_io.py        # File I/O helpers (GCS-compatible)
+│       └── storage_paths.py     # Data lake zone path builder
+├── frontend/src/
+│   ├── pages/
+│   │   ├── ChatPage.jsx         # RAG chatbot with markdown rendering
+│   │   ├── LogAnalysisPage.jsx  # Paste logs → AI diagnosis
+│   │   ├── AirflowPage.jsx      # Task log analysis + recent failures
+│   │   ├── K8sPage.jsx          # Pod browser + namespace diagnosis
+│   │   └── LineagePage.jsx      # Data flow + task lineage view
+│   └── components/
+│       ├── Sidebar.jsx           # Navigation + ChromaDB stats + actions
+│       ├── ModeSelector.jsx      # LLM mode selector
+│       └── LogResultDisplay.jsx  # Analysis result card + Ask in Chat
 ├── docker/
-│   ├── Dockerfile.backend      # FastAPI + RAG + embeddings
-│   ├── Dockerfile.airflow      # Airflow + OpenLineage + DAGs
-│   ├── Dockerfile.frontend     # Streamlit UI
-│   ├── docker-compose.yml      # Full stack (11 services)
-│   └── init-multiple-dbs.sh    # PostgreSQL multi-DB init
+│   ├── Dockerfile.backend       # FastAPI + embeddings + google-genai
+│   ├── Dockerfile.airflow       # Airflow + OpenLineage + DAGs
+│   └── Dockerfile.frontend      # React build → nginx
 ├── k8s/
-│   ├── namespaces.yaml         # backend, airflow, data, monitoring
-│   ├── ingress.yaml            # External access rules
+│   ├── namespaces.yaml          # backend, airflow, data namespaces
 │   ├── backend/
-│   │   ├── deployment.yaml     # FastAPI + ConfigMap + PVC
-│   │   ├── ollama.yaml         # Ollama LLM server
-│   │   └── frontend.yaml       # Streamlit UI
+│   │   ├── deployment.yaml      # Backend + ConfigMap + Secret + PVC
+│   │   ├── frontend.yaml        # Frontend nginx + Service (LoadBalancer)
+│   │   └── rbac.yaml            # ServiceAccount + ClusterRoleBinding
 │   ├── airflow/
-│   │   └── deployment.yaml     # Webserver + Scheduler + Worker + Redis
-│   └── data/
-│       ├── postgres.yaml       # PostgreSQL + PVC
-│       └── marquez.yaml        # Marquez API + Web UI
-├── frontend/
-│   └── streamlit_app.py        # Chat UI with RAG controls
-├── scripts/
-│   ├── index_codebase.py       # Index project code → ChromaDB
-│   ├── sync_lineage.py         # Sync Marquez lineage → ChromaDB
-│   ├── analyze_command.py      # Wrap deploy command with analysis
-│   ├── analyze_k8s_pod.py      # CLI: analyze K8s pod logs
-│   ├── analyze_airflow_task.py # CLI: analyze Airflow task logs
-│   └── post_logs.py            # POST log file to backend
-├── ci/
-│   └── github-actions-example.yml
-├── requirements.txt
-├── .env.example
-└── README.md
+│   │   └── deployment.yaml      # Webserver + Scheduler + Service (LoadBalancer)
+│   ├── data/
+│   │   ├── postgres.yaml        # PostgreSQL StatefulSet + PVC
+│   │   └── marquez.yaml         # Marquez API + Web UI
+│   └── demo-faults.yaml         # Broken pods for K8s observability demo
+└── scripts/
+    ├── deploy-gke.sh            # Full one-command GKE deployment
+    └── teardown-gke.sh          # Delete cluster and all resources
 ```
-
-## Technology Choices (All Free & Open-Source)
-
-| Need | Choice | Why |
-|---|---|---|
-| LLM | **LLaMA 3.1:8b via Ollama** | Best open-source model at 8B scale. Runs on CPU (slow) or GPU (fast). Ollama makes it trivial to run locally. |
-| Embeddings | **all-MiniLM-L6-v2** (sentence-transformers) | Only ~80 MB, runs on CPU, excellent quality for semantic search. No API needed. |
-| Vector DB | **ChromaDB** | Simple, Python-native, persistent storage, cosine similarity built-in. Zero config. |
-| Lineage | **OpenLineage + Marquez** | Linux Foundation projects. OpenLineage is the standard for lineage events. Marquez stores + visualizes them. |
-| Orchestration | **Apache Airflow** | Industry standard for data pipeline orchestration. Native OpenLineage support. |
-| Container runtime | **Docker** | Standard containerization. |
-| K8s deployment | **Kubernetes manifests** | Production-grade orchestration, scaling, self-healing. |
-| Backend | **FastAPI** | Async, fast, auto-generated OpenAPI docs. |
-| Frontend | **Streamlit** | Quick Python-native UI for data tools. |
 
 ## How the RAG Pipeline Works
 
 ```
-User Question
-      │
-      ▼
- ┌────────────────┐
- │ Encode query    │  ← sentence-transformers (all-MiniLM-L6-v2)
- │ into embedding  │
- └───────┬────────┘
-         │
-         ▼
- ┌────────────────┐
- │ Search ChromaDB │  ← Query 4 collections:
- │  (cosine sim)   │     code_embeddings, log_embeddings,
- │                 │     dag_metadata, lineage_data
- └───────┬────────┘
-         │
-         ▼
- ┌────────────────┐
- │ Filter & rank   │  ← Distance threshold, sort by relevance
- │ retrieved chunks│
- └───────┬────────┘
-         │
-         ▼
- ┌────────────────┐
- │ Assemble prompt │  ← System prompt + context + history + question
- │ with context    │
- └───────┬────────┘
-         │
-         ▼
- ┌────────────────┐
- │ Call Ollama     │  ← LLaMA 3.1:8b generates answer
- │ (LLaMA 3.1)    │
- └───────┬────────┘
-         │
-         ▼
-    Answer + Sources
+User question (e.g. "Why did validate_raw_data fail?")
+        │
+        ▼
+  Encode with all-MiniLM-L6-v2
+        │
+        ▼
+  Search 4 ChromaDB collections
+  ├── code_embeddings   (DAG source, backend code)
+  ├── log_embeddings    (analyzed failure logs)
+  ├── dag_metadata      (DAG/task descriptions)
+  └── lineage_data      (dataset I/O from Marquez)
+        │
+        ▼
+  Inject live context (if relevant):
+  ├── Airflow ops snapshot (DAG states, recent failures)
+  ├── Kubernetes namespace diagnosis
+  └── Airflow task log analysis
+        │
+        ▼
+  Build prompt: system prompt + retrieved chunks + live context + question
+        │
+        ▼
+  Google Gemini Flash → answer
+        │
+        ▼
+  Response + cited sources
 ```
+
+## Environment Variables
+
+Set in `k8s/backend/deployment.yaml` (ConfigMap) and as a K8s Secret:
+
+| Variable | Where | Description |
+|---|---|---|
+| `GOOGLE_API_KEY` | Secret | Google AI Studio API key |
+| `LLM_PROVIDER` | ConfigMap | `vertex` (uses Gemini) |
+| `VERTEX_MODEL` | ConfigMap | `gemini-2.5-flash` or `gemini-2.0-flash` |
+| `EMBEDDING_MODEL` | ConfigMap | `all-MiniLM-L6-v2` |
+| `CHROMADB_MODE` | ConfigMap | `local` |
+| `CHROMADB_PERSIST_DIR` | ConfigMap | `/chromadb` (PVC-mounted) |
+| `AIRFLOW_BASE_URL` | ConfigMap | Internal cluster URL for Airflow API |
+| `AIRFLOW_USERNAME` | ConfigMap | `admin` |
+| `AIRFLOW_PASSWORD` | ConfigMap | `admin` |
+| `MARQUEZ_URL` | ConfigMap | Internal cluster URL for Marquez |
+
+> **Never run `kubectl apply -f k8s/backend/deployment.yaml` directly** — it contains `REPLACE_ME` as the API key placeholder. Always inject the secret separately:
+> ```cmd
+> kubectl -n backend create secret generic backend-secrets --from-literal=GOOGLE_API_KEY="your-key" --dry-run=client -o yaml | kubectl apply -f -
+> ```
 
 ## Troubleshooting
 
 | Issue | Solution |
 |---|---|
-| Ollama not responding | Run `ollama serve` and check http://localhost:11434 is accessible |
-| "No indexed context" in chat | Run `python scripts\index_codebase.py` to index the codebase |
-| Slow LLM responses | LLaMA 3.1:8b on CPU takes ~30-60s. Use a GPU or try `ollama pull phi3:mini` for faster (smaller) model |
-| ChromaDB errors | Delete `.chromadb/` folder and re-index |
-| Airflow DAGs not showing | Check that `dags/` folder is mounted into the Airflow container |
-| Marquez unreachable | Verify Marquez is running at the configured `MARQUEZ_URL` |
-| Docker compose OOM | Increase Docker Desktop memory to at least 8 GB |
+| Chat returns "API key not valid" | Re-inject the secret: `kubectl -n backend create secret generic backend-secrets --from-literal=GOOGLE_API_KEY="key" --dry-run=client -o yaml \| kubectl apply -f -`, then `kubectl -n backend rollout restart deployment/backend` |
+| Chat returns "503 Unavailable" | Gemini rate limit — wait 1-2 min, or switch `VERTEX_MODEL` to `gemini-2.0-flash` |
+| Recent failures not showing | Background sync takes ~5s after pod start. Wait and hard refresh (`Ctrl+Shift+R`) |
+| Airflow "Errno -2 Name or service not known" | Re-apply ConfigMap: `kubectl apply -f k8s/backend/deployment.yaml` (API key will be overwritten — re-inject secret after) |
+| `kubectl` fails with `gke-gcloud-auth-plugin not found` | Run: `gcloud components install gke-gcloud-auth-plugin` |
+| `InvalidImageName` on deployment | Variables not set in CMD session — re-run `set REGISTRY=...` and `set TAG=...` before `kubectl set image` |
+| Lineage shows "no datasets" | Expand a task to see inputs/outputs. If still empty, DAGs haven't run yet — trigger a DAG in Airflow first |
+| Backend pod restarting | Check logs: `kubectl -n backend logs deployment/backend --tail=50` |
